@@ -1,0 +1,2489 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Registro de Cirurgias</title>
+<meta name="description" content="Registro pessoal de cirurgias e valores a receber. Os dados ficam só neste aparelho.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Cirurgias">
+<meta name="format-detection" content="telephone=no">
+<meta name="theme-color" content="#eef3f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1413" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: app de bolso — barra fixa no topo, conteúdo em coluna única, abas embaixo; datas como etiquetas térmicas de hospital. */
+:root {
+  --bg: #eef3f1;
+  --surface: #ffffff;
+  --surface-2: #e4ebe8;
+  --ink: #142220;
+  --muted: #5a6b67;
+  --line: #d3ddd9;
+  --accent: #0b6b66;
+  --accent-ink: #ffffff;
+  --accent-soft: #d5ebe7;
+  --ok: #1c7445;
+  --ok-soft: #dcefe3;
+  --warn: #9a5a06;
+  --warn-soft: #f6e8cf;
+  --danger: #b0261f;
+  --danger-soft: #f7dedb;
+  --night: #47499c;
+  --night-soft: #e3e3f6;
+  --label: #fbfcf8;
+  --on-danger: #ffffff;
+  --shadow: 0 1px 2px rgba(20, 34, 32, .06), 0 6px 18px rgba(20, 34, 32, .06);
+  --font-ui: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 14px;
+  --tabbar-h: 58px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1413; --surface: #151f1e; --surface-2: #1d2a28; --ink: #e4eeeb; --muted: #94a7a2; --line: #2a3a37;
+    --accent: #52b9ae; --accent-ink: #052220; --accent-soft: #15403c;
+    --ok: #6cc996; --ok-soft: #173826; --warn: #e7ab52; --warn-soft: #3d2c12; --danger: #f08a80; --danger-soft: #45201d;
+    --night: #a7a9f4; --night-soft: #262848; --label: #1a2422; --on-danger: #2a0d0b; --shadow: 0 1px 2px rgba(0, 0, 0, .3); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1413; --surface: #151f1e; --surface-2: #1d2a28; --ink: #e4eeeb; --muted: #94a7a2; --line: #2a3a37;
+  --accent: #52b9ae; --accent-ink: #052220; --accent-soft: #15403c;
+  --ok: #6cc996; --ok-soft: #173826; --warn: #e7ab52; --warn-soft: #3d2c12; --danger: #f08a80; --danger-soft: #45201d;
+  --night: #a7a9f4; --night-soft: #262848; --label: #1a2422; --on-danger: #2a0d0b; --shadow: 0 1px 2px rgba(0, 0, 0, .3); color-scheme: dark;
+}
+
+[hidden] { display: none !important; }
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.45 var(--font-ui); -webkit-font-smoothing: antialiased;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 calc(var(--tabbar-h) + 24px + env(safe-area-inset-bottom, 0px));
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+html.sheet-open body { overflow: hidden; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.ic { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic.sm { width: 16px; height: 16px; }
+
+/* barra do topo */
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); margin-inline: calc(-1 * max(16px, env(safe-area-inset-left, 0px))) calc(-1 * max(16px, env(safe-area-inset-right, 0px))); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.topbar-in { max-width: 720px; margin: 0 auto; display: flex; align-items: center; gap: 12px; min-height: 56px; }
+.topbar h1 { font-size: 24px; font-weight: 700; letter-spacing: -.01em; flex: 1; min-width: 0; }
+.topbar .sub { display: block; font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; padding-top: 4px; }
+
+/* abas */
+.tabbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--surface); border-top: 1px solid var(--line);
+  padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
+.tabbar-in { max-width: 720px; margin: 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.tab { border: 0; background: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 0; font-size: 11px; font-weight: 600; color: var(--muted); border-radius: 10px; min-height: 46px; }
+.tab[aria-current="page"] { color: var(--accent); }
+.tab .ic { width: 24px; height: 24px; }
+
+/* botões */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  padding: 12px 16px; border-radius: 12px; font-weight: 600; font-size: 15px; min-height: 46px; text-align: center; line-height: 1.2; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--accent); }
+.btn.sm { min-height: 38px; padding: 8px 12px; font-size: 14px; border-radius: 10px; }
+.btn.block { width: 100%; }
+.btn:disabled { opacity: .45; cursor: default; }
+.icon-btn { border: 0; background: none; width: 44px; height: 44px; display: inline-grid; place-items: center; border-radius: 12px; color: var(--ink); flex: none; }
+.icon-btn-ph { width: 44px; height: 44px; flex: none; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.actions .btn.primary { grid-column: 1 / -1; }
+
+/* cartões e seções */
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; }
+.section { display: flex; flex-direction: column; gap: 10px; }
+.section-title { font-size: 12px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.section-title button { border: 0; background: none; color: var(--accent); font-weight: 600; font-size: 13px; letter-spacing: 0; text-transform: none; padding: 4px 0; }
+
+/* destaque: a receber */
+.hero { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow); }
+.hero .label { font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.hero .big { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: clamp(30px, 9vw, 40px); font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+.hero .big small { font-size: .5em; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-right: 4px; }
+.aging { display: flex; height: 10px; border-radius: 6px; overflow: hidden; background: var(--surface-2); }
+.aging span { display: block; height: 100%; }
+.aging-legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; font-size: 12px; }
+.aging-legend div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.aging-legend b { font-family: var(--font-mono); font-weight: 500; font-variant-numeric: tabular-nums; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: 1px; }
+.a0 { background: var(--accent); } .a1 { background: color-mix(in srgb, var(--accent) 55%, var(--warn)); } .a2 { background: var(--warn); } .a3 { background: var(--danger); }
+
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stat .k { font-size: 12px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 21px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.stat .s { font-size: 13px; color: var(--muted); }
+
+/* avisos que pedem ação */
+.alerts { display: flex; flex-direction: column; gap: 8px; }
+.alert { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); text-align: left; width: 100%; }
+.alert .ic { color: var(--muted); }
+.alert .t { flex: 1; min-width: 0; font-weight: 600; font-size: 15px; }
+.alert .t span { display: block; font-weight: 400; font-size: 13px; color: var(--muted); }
+.alert.warn { border-color: color-mix(in srgb, var(--warn) 35%, var(--line)); background: var(--warn-soft); }
+.alert.warn .ic { color: var(--warn); }
+.alert.danger { border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); background: var(--danger-soft); }
+.alert.danger .ic { color: var(--danger); }
+.alert.info .ic { color: var(--accent); }
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 14px; }
+.banner .ic { color: var(--accent); margin-top: 1px; }
+.banner b { display: block; font-size: 15px; }
+.banner button { margin-top: 6px; border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; font-size: 14px; }
+
+/* lista de cirurgias */
+.month-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 2px 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.month-head .num { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.rlist { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.ritem { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; width: 100%; }
+.ritem:first-child { border-top: 0; }
+.ritem.sel { background: var(--accent-soft); }
+.tagdate { font-family: var(--font-mono); font-variant-numeric: tabular-nums; background: var(--label); border: 1px dashed var(--line); border-radius: 6px; padding: 5px 6px; width: 62px; text-align: center; line-height: 1.15; display: flex; flex-direction: column; align-items: center; }
+.tagdate .wd { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.tagdate .d { font-size: 15px; font-weight: 600; }
+.tagdate .h { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 2px; }
+.tagdate .h .ic { width: 11px; height: 11px; color: var(--night); stroke-width: 2.2; }
+.rmain { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rmain .p { font-weight: 600; font-size: 15px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rmain .m { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0 8px; align-items: center; }
+.rmain .m .ic { width: 13px; height: 13px; }
+.rside { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; text-align: right; }
+.rside .val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.rside .val.est { color: var(--muted); font-weight: 500; }
+.pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; letter-spacing: .03em; padding: 3px 8px; border-radius: 99px; white-space: nowrap; background: var(--surface-2); color: var(--muted); }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.danger { background: var(--danger-soft); color: var(--danger); }
+.pill.night { background: var(--night-soft); color: var(--night); }
+.pill.wrap { white-space: normal; border-radius: 10px; padding: 6px 10px; line-height: 1.35; font-weight: 600; font-size: 12px; align-items: flex-start; }
+.pill.wrap .ic { margin-top: 1px; }
+.refs { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.refs > div { display: flex; flex-direction: column; gap: 2px; padding: 11px 14px; border-top: 1px solid var(--line); }
+.refs > div:first-child { border-top: 0; }
+.refs b { font-weight: 600; font-size: 15px; }
+.refs span { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+.pill.accent { background: var(--accent-soft); color: var(--accent); }
+.empty { text-align: center; padding: 28px 16px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
+/* busca e filtros */
+.search { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; min-height: 46px; }
+.search input[type="search"] { border: 0; outline: 0; background: none; flex: 1; min-width: 0; font-size: 16px; padding: 10px 0; min-height: 0; border-radius: 0; -webkit-appearance: none; appearance: none; }
+.search .ic { color: var(--muted); }
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; margin-inline: -2px; padding-inline: 2px; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; border: 1px solid var(--line); background: var(--surface); padding: 8px 12px; border-radius: 99px; font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.chip .n { font-family: var(--font-mono); font-weight: 500; opacity: .75; margin-left: 4px; }
+.filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.filters select { width: 100%; }
+.selbar { position: sticky; top: calc(56px + env(safe-area-inset-top, 0px)); z-index: 4; display: flex; gap: 8px; align-items: center; background: var(--ink); color: var(--bg); border-radius: 12px; padding: 8px 8px 8px 14px; font-size: 14px; font-weight: 600; }
+.selbar span { flex: 1; }
+.selbar .btn { min-height: 36px; padding: 6px 10px; font-size: 13px; background: var(--bg); color: var(--ink); border-color: transparent; }
+
+/* formulários */
+.form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field > label, .field > .lbl { font-size: 13px; font-weight: 600; color: var(--muted); }
+.field .hint { font-size: 12px; color: var(--muted); }
+input[type="text"], input[type="date"], input[type="time"], input[type="number"], input[type="search"], input[type="password"], input:not([type]), select, textarea {
+  width: 100%; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; font-size: 16px; min-height: 46px; color: var(--ink); }
+textarea { min-height: 84px; resize: vertical; }
+select { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 32px; }
+input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: none; text-align: left; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { min-width: 0; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tags:empty { display: none; }
+.tag { display: inline-flex; align-items: center; gap: 2px; background: var(--accent-soft); color: var(--ink); border-radius: 8px; padding: 5px 4px 5px 10px; font-size: 14px; font-weight: 600; max-width: 100%; }
+.tag button { border: 0; background: none; width: 26px; height: 26px; display: grid; place-items: center; color: var(--muted); border-radius: 6px; padding: 0; }
+.tag button .ic { width: 15px; height: 15px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--surface-2); border-radius: 10px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: none; border-radius: 8px; padding: 8px 4px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.kv { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; font-size: 14px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.caption-box { background: var(--label); border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; font-family: var(--font-mono); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.flags { display: flex; flex-direction: column; gap: 6px; }
+
+/* fotos */
+.photos { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.thumb { flex: none; width: 92px; height: 92px; border-radius: 10px; overflow: hidden; background: var(--surface-2); border: 1px solid var(--line); padding: 0; position: relative; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.add { display: grid; place-items: center; color: var(--accent); border-style: dashed; }
+.pgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ptile { position: relative; aspect-ratio: 1; max-width: 100%; border-radius: 10px; overflow: hidden; border: 2px solid transparent; padding: 0; background: var(--surface-2); }
+.ptile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ptile.sel { border-color: var(--accent); }
+.ptile .chk { position: absolute; top: 6px; left: 6px; width: 24px; height: 24px; border-radius: 99px; border: 2px solid #fff; background: rgba(0,0,0,.25); display: grid; place-items: center; color: #fff; }
+.ptile.sel .chk { background: var(--accent); border-color: var(--accent); }
+.ptile .chk .ic { width: 15px; height: 15px; stroke-width: 3; }
+.ptile .zoom { position: absolute; right: 4px; bottom: 4px; width: 32px; height: 32px; border-radius: 8px; border: 0; background: rgba(0,0,0,.45); color: #fff; display: grid; place-items: center; }
+.ptile .zoom .ic { width: 17px; height: 17px; }
+.viewer { position: fixed; inset: 0; z-index: 60; background: #000; display: flex; flex-direction: column; color: #fff; }
+.viewer-top { display: flex; justify-content: space-between; align-items: center; padding: calc(6px + env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px)); }
+.viewer-top .icon-btn { color: #fff; }
+.viewer-img { flex: 1; overflow: auto; display: grid; place-items: center; -webkit-overflow-scrolling: touch; }
+.viewer-img img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.viewer-img.zoom { place-items: start; }
+.viewer-img.zoom img { max-width: none; max-height: none; width: 200%; }
+.viewer-nav { display: flex; justify-content: space-between; padding: 8px max(8px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); }
+.viewer-nav .icon-btn { color: #fff; }
+
+/* folhas (telas por cima) */
+.sheet { position: fixed; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column; transform: translateY(100%); transition: transform .26s cubic-bezier(.2, .8, .2, 1); box-shadow: 0 -10px 30px rgba(0, 0, 0, .08); }
+.sheet.open { transform: none; }
+.sheet.closing { transform: translateY(100%); }
+.sheet-head { display: flex; align-items: center; gap: 4px; padding: calc(4px + env(safe-area-inset-top, 0px)) max(6px, env(safe-area-inset-right, 0px)) 4px max(6px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); background: var(--bg); }
+.sheet-head h2 { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-block: 16px 28px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.sheet-body > .inner { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.sheet-foot { border-top: 1px solid var(--line); background: var(--surface); padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.sheet-foot > .inner { max-width: 640px; margin: 0 auto; display: flex; gap: 10px; }
+.sheet-foot .btn { flex: 1; }
+.steps { display: flex; flex-direction: column; gap: 12px; counter-reset: s; padding: 0; margin: 0; list-style: none; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; font-size: 15px; }
+.steps li::before { content: counter(s); font-family: var(--font-mono); font-weight: 600; font-size: 14px; width: 28px; height: 28px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
+.steps code { font-family: var(--font-mono); font-size: 13px; background: var(--surface-2); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+.term-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.term-row:first-child { border-top: 0; padding-top: 0; }
+.term-row .t { font-weight: 700; display: flex; justify-content: space-between; gap: 8px; }
+.act { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.act:first-child { border-top: 0; padding-top: 0; }
+.act .l1 { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.act .l1 b { font-weight: 600; }
+.act .to { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; color: var(--muted); }
+.act .to .ic { color: var(--accent); width: 18px; height: 18px; margin-top: 1px; }
+.progress { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.progress span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+
+/* relatórios */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+table.rep { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.rep th, table.rep td { padding: 10px 9px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+table.rep th { border-top: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--surface-2); }
+table.rep td:first-child, table.rep th:first-child { text-align: left; }
+table.rep td { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+table.rep td:first-child { font-family: var(--font-ui); font-weight: 600; white-space: normal; min-width: 70px; }
+table.rep td:first-child small { display: block; font-weight: 400; font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+table.rep tr.tot td { font-weight: 700; border-top: 2px solid var(--line); }
+.bars { display: flex; flex-direction: column; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 82px; gap: 10px; align-items: center; font-size: 13px; }
+.bar-row .lab { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .04em; }
+.bar-track { height: 16px; border-radius: 5px; background: var(--surface-2); display: flex; overflow: hidden; }
+.bar-track .rec { background: var(--accent); }
+.bar-track .est { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 45%, transparent) 0 4px, color-mix(in srgb, var(--accent) 20%, transparent) 4px 8px); }
+.bar-row .v { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -2px; }
+.legend .rec { background: var(--accent); }
+.legend .est { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--accent) 45%, transparent) 0 3px, color-mix(in srgb, var(--accent) 20%, transparent) 3px 6px); }
+
+/* ajustes */
+.list-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.li { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 14px; border: 0; border-top: 1px solid var(--line); background: none; text-align: left; font-size: 15px; min-height: 52px; }
+.li:first-child { border-top: 0; }
+.li .ic { color: var(--accent); }
+.li .t { flex: 1; min-width: 0; }
+.li .t span { display: block; font-size: 13px; color: var(--muted); }
+.li .chev { color: var(--muted); width: 18px; height: 18px; }
+.li.danger, .li.danger .ic { color: var(--danger); }
+
+/* diálogos, avisos rápidos, bloqueio */
+.dialog-wrap { position: fixed; inset: 0; z-index: 80; background: rgba(8, 14, 13, .45); display: grid; place-items: center; padding: 24px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); }
+.dialog { background: var(--surface); border-radius: 16px; padding: 20px; width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+.dialog h3 { font-size: 18px; }
+.dialog p { color: var(--muted); font-size: 15px; }
+.dialog-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+.dialog-actions .btn { flex: 1; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabbar-h) + 22px + env(safe-area-inset-bottom, 0px)); z-index: 90; background: var(--ink); color: var(--bg); padding: 11px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; max-width: min(92vw, 420px); box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+.lock { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; }
+.lock .ic { width: 34px; height: 34px; color: var(--accent); }
+.lock input { max-width: 220px; text-align: center; font-family: var(--font-mono); font-size: 24px; letter-spacing: .3em; }
+.lock .err { color: var(--danger); font-size: 14px; min-height: 20px; }
+
+@media (min-width: 560px) {
+  .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .actions { grid-template-columns: 2fr 1fr 1fr; }
+  .actions .btn.primary { grid-column: auto; }
+  .filters { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) { .sheet, .progress span { transition: none; } }
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-in">
+    <h1 id="title"><span class="sub">&nbsp;</span>Registro de Cirurgias</h1>
+    <div id="top-actions" class="row"></div>
+  </div>
+</header>
+<main id="main" class="main"></main>
+<nav class="tabbar" id="tabbar" aria-label="Seções"></nav>
+<div id="sheets"></div>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<input type="file" id="file-in" hidden accept=".zip,.txt,.xlsx,.json,application/zip,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+<input type="file" id="photo-in" hidden accept="image/*" multiple>
+
+<script>window.APP_MODE = 'app';</script>
+<script>
+/* Registro de Cirurgias — núcleo (sem interface).
+   Leitura do WhatsApp exportado, leitura do repasse (.xlsx), dicionário de termos,
+   cruzamento repasse x cirurgias, estimativas, zip (ler/gravar). Roda no navegador e no Node. */
+(function (root) {
+  'use strict';
+
+  // ---------- utilidades ----------
+  const MARKS = /[‎‏‪-‮⁦-⁩﻿]/g;
+  const stripMarks = (s) => String(s == null ? '' : s).replace(MARKS, '');
+  function norm(s) {
+    return stripMarks(s).normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const ymd = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
+  function parseYMD(s) { const [y, m, d] = String(s).split('-').map(Number); return { y, m, d }; }
+  function dayNum(s) { const { y, m, d } = parseYMD(s); return Math.floor(Date.UTC(y, m - 1, d) / 86400000); }
+  function fromDayNum(n) { const dt = new Date(n * 86400000); return ymd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate()); }
+  function minutesOf(date, time) {
+    const t = time ? (+time.slice(0, 2)) * 60 + (+time.slice(3, 5)) : 12 * 60;
+    return dayNum(date) * 1440 + t;
+  }
+  const weekday = (s) => new Date(dayNum(s) * 86400000).getUTCDay(); // 0 = domingo
+  function validDate(y, m, d) {
+    if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1990 && y <= 2100)) return false;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCMonth() === m - 1;
+  }
+  function todayStr(now) {
+    const d = now || new Date();
+    return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
+  }
+  function median(arr) {
+    if (!arr.length) return null;
+    const a = [...arr].sort((x, y) => x - y); const k = Math.floor(a.length / 2);
+    return a.length % 2 ? a[k] : (a[k - 1] + a[k]) / 2;
+  }
+  const round2 = (v) => Math.round(v * 100) / 100;
+  function levenshtein(a, b) {
+    if (a === b) return 0; if (!a.length) return b.length; if (!b.length) return a.length;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+  function capFirst(s) { s = String(s || '').trim(); return s ? s[0].toUpperCase() + s.slice(1) : s; }
+  function sentenceCase(s) { return capFirst(String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()); }
+  function uid(prefix) { return (prefix || 'x') + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  // ---------- feriados e urgência (CBHPM: 19h–7h, sábados, domingos e feriados) ----------
+  function easter(y) {
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4,
+      f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30,
+      i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451),
+      month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+    return ymd(y, month, day);
+  }
+  const FIXED_HOLIDAYS = ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25'];
+  function parseExtraHolidays(txt) {
+    return String(txt || '').split(/[\s,;]+/).map((s) => {
+      const m = s.match(/^(\d{1,2})\/(\d{1,2})$/); return m ? `${pad2(m[2])}-${pad2(m[1])}` : null;
+    }).filter(Boolean);
+  }
+  function isHoliday(date, extra) {
+    const md = date.slice(5);
+    if (FIXED_HOLIDAYS.includes(md) || (extra || []).includes(md)) return true;
+    const y = +date.slice(0, 4);
+    return date === fromDayNum(dayNum(easter(y)) - 2); // sexta-feira santa
+  }
+  /** true = horário de urgência; false = horário normal; null = sem hora e dia útil */
+  function isUrgent(date, time, extra) {
+    if (!date) return null;
+    const wd = weekday(date);
+    if (wd === 0 || wd === 6 || isHoliday(date, extra)) return true;
+    if (!time) return null;
+    const h = +time.slice(0, 2);
+    return h >= 19 || h < 7;
+  }
+
+  // ---------- dicionário ----------
+  const T = { PROC: 'proc', HOSP: 'hosp', COL: 'col', CONV: 'conv', IGN: 'ign' };
+  const TYPE_LABEL = { proc: 'Procedimento', hosp: 'Hospital', col: 'Colega', conv: 'Convênio', ign: 'Ignorar' };
+  // Procedimentos e abreviações gerais + hospitais. Colegas são aprendidos na primeira importação.
+  const DEFAULT_TERMS = [
+    ['proc', 'Colecistectomia videolaparoscópica', 'colecistectomia', ['cvl', 'cvlp', 'colecistectomia vlp', 'colecistectomia video', 'colecistectomia videolaparoscopica', 'colecistectomia por videolaparoscopia', 'colecisto vlp'], [['colecistectomia', 'video']]],
+    ['proc', 'Colecistectomia', 'colecistectomia', ['colecistectomia', 'colecisto', 'colecistectomia aberta'], [['colecistectomia']]],
+    ['proc', 'Apendicectomia videolaparoscópica', 'apendicectomia', ['apvl', 'apvlp', 'apendicectomia vlp', 'apendicite vlp', 'apendice vlp', 'apendicectomia video', 'apendicectomia videolaparoscopica', 'apendicectomia por videolaparoscopia'], [['apendicectomia', 'video']]],
+    ['proc', 'Apendicectomia', 'apendicectomia', ['apendicectomia', 'apendicite', 'apendice', 'apendicectomia aberta'], [['apendicectomia']]],
+    ['proc', 'Herniorrafia videolaparoscópica', 'herniorrafia', ['hernia vlp', 'herniorrafia vlp', 'hernioplastia vlp', 'herniorrafia videolaparoscopica', 'hernioplastia videolaparoscopica'], [['herni', 'video']]],
+    ['proc', 'Herniorrafia', 'herniorrafia', ['hernia', 'herniorrafia', 'hernioplastia'], [['herniorrafia'], ['hernioplastia']]],
+    ['proc', 'Correção de hérnia interna', 'herniorrafia', ['hernia interna'], [['hernia', 'interna']]],
+    ['proc', 'Correção de hérnia encarcerada', 'herniorrafia', ['hernia encarcerada', 'hernia estrangulada'], [['encarcerada'], ['estrangulada']]],
+    ['proc', 'Correção de hérnia encarcerada (VLP)', 'herniorrafia', ['hernia encarcerada vlp', 'hernia estrangulada vlp'], []],
+    ['proc', 'Laparotomia exploradora', 'laparotomia', ['le', 'laparotomia exploradora', 'laparotomia', 'lap exploradora'], [['laparotomia']]],
+    ['proc', 'Fechamento de parede abdominal', 'parede', ['fechamento de parede', 'fechamento parede', 'fechamento de parede abdominal'], [['fechamento', 'parede']]],
+    ['proc', 'Drenagem de abscesso', 'drenagem', ['drenagem de abscesso', 'drenagem abscesso'], [['drenagem', 'abscesso']]],
+    ['proc', 'Videolaparoscopia', 'videolaparoscopia', ['videolaparoscopia', 'vlp', 'videolaparoscopia diagnostica', 'laparoscopia diagnostica'], [['laparoscopia', 'diagnostica']]],
+    ['proc', 'Videolaparoscopia (abdome agudo obstrutivo)', 'videolaparoscopia', ['abd agudo obstrutivo', 'abdome agudo obstrutivo', 'abd agudo obstrutivo vlp', 'abdome agudo obstrutivo vlp'], []],
+    ['proc', 'Distorção de volvo (VLP)', 'volvo', ['volvo', 'vlp volvo', 'vlp volvo direito', 'distorcao de volvo', 'detorcao de volvo'], [['volvo']]],
+    ['proc', 'Colectomia parcial videolaparoscópica', 'colectomia', ['colectomia parcial videolaparoscopica', 'colectomia parcial vlp', 'colectomia vlp'], [['colectomia', 'video']]],
+    ['proc', 'Colectomia parcial', 'colectomia', ['colectomia parcial', 'colectomia'], [['colectomia']]],
+    ['proc', 'Desbridamento de úlcera', 'desbridamento', ['desbridamento ulcera', 'desbridamento de ulcera'], [['desbridamento', 'ulcera']]],
+    ['proc', 'Desbridamento de lesão', 'desbridamento', ['desbridamento de lesao', 'desbridamento lesao', 'desbridamento'], [['desbridamento']]],
+    ['proc', 'Histerectomia', 'histerectomia', ['histerectomia', 'histerectomia total'], [['histerectomia']]],
+    ['proc', 'Colostomia', 'colostomia', ['colostomia'], [['colostomia']]],
+    ['proc', 'Cisto sacrococcígeo (tratamento cirúrgico)', 'cisto sacrococcigeo', ['cisto sacrococcigeo', 'cisto pilonidal'], [['sacrococcigeo'], ['pilonidal']]],
+    ['hosp', 'UMC', null, ['umc'], null],
+    ['hosp', 'Santa Clara', null, ['santa clara', 'sta clara', 'mater dei', 'materdei', 'mater dei santa clara'], null],
+    ['hosp', 'Santa Genoveva', null, ['santa genoveva', 'sta genoveva', 'genoveva'], null],
+  ];
+  function defaultTerms() {
+    return DEFAULT_TERMS.map(([type, name, fam, aliases, kw], i) => ({
+      id: 't' + type + i, type, name, fam: fam || undefined, aliases: aliases.map(norm), kw: kw || undefined,
+    }));
+  }
+  function buildIndex(terms) {
+    const phrases = [];
+    for (const t of terms) {
+      const set = new Set([norm(t.name), ...(t.aliases || []).map(norm)]);
+      for (const a of set) if (a) phrases.push({ toks: a.split(' '), alias: a, term: t });
+    }
+    phrases.sort((a, b) => b.toks.length - a.toks.length || b.alias.length - a.alias.length);
+    const byName = new Map(terms.map((t) => [t.type + '|' + t.name, t]));
+    return { terms, phrases, byName };
+  }
+  const famOf = (index, procName) => { const t = index.byName.get('proc|' + procName); return t && t.fam ? t.fam : norm(procName).split(' ')[0]; };
+
+  // ---------- leitura de legenda em formato livre ----------
+  const PROCISH = /(ectomia|otomia|ostomia|plastia|rafia|pexia|scopia|hernia|drenag|desbrid|biopsia|exerese|ressec|laparo|sutura|correc|reconstru|amputa|enxerto|retalho|abscesso|cisto|lesao|fechamento|retirada|implante|colocacao|troca|lavagem|limpeza|tumor|nodulo|fistula|anastomose|derivacao|cateter|dreno|varizes|safen|hemorroid|fissura|vlp|video)/;
+  const WEEKDAY_RE = /\b(segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)(\s*-?\s*feira)?\b|\bfeira\b|\bhoje\b|\bontem\b/gi;
+  const SPLIT_RE = /\s+[-–—]+\s*|\s*[-–—]+\s+|\s*[+;,\n\/|]\s*/;
+  const AMEND_RE = /^\s*(convertid[oa]s?|convers[aã]o|obs\b|observa[cç][aã]o|corre[cç][aã]o:)/i;
+
+  function tokenize(seg) {
+    const out = [];
+    for (const m of String(seg).matchAll(/[\p{L}\p{N}]+/gu)) {
+      const n = norm(m[0]); if (!n) continue;
+      for (const part of n.split(' ')) out.push({ o: m[0], n: part });
+    }
+    return out;
+  }
+  function scan(tokens, index, types, used) {
+    const found = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (used[i]) continue;
+      for (const ph of index.phrases) {
+        if (!types.includes(ph.term.type)) continue;
+        const L = ph.toks.length; if (i + L > tokens.length) continue;
+        let ok = true;
+        for (let k = 0; k < L; k++) if (used[i + k] || tokens[i + k].n !== ph.toks[k]) { ok = false; break; }
+        if (ok) { for (let k = 0; k < L; k++) used[i + k] = true; found.push({ term: ph.term, alias: ph.alias, at: i, len: L }); i += L - 1; break; }
+      }
+    }
+    return found;
+  }
+
+  /**
+   * Lê uma legenda livre. Retorna campos reconhecidos + termos desconhecidos.
+   * msgDate: 'YYYY-MM-DD' da mensagem (para inferir o ano de "06/07").
+   */
+  function parseCaption(raw, index, msgDate) {
+    const res = { date: null, time: null, valor: null, procs: [], hosp: null, cols: [], conv: null, unknown: [], amend: false, empty: true };
+    let text = stripMarks(raw || '').trim();
+    if (!text) return res;
+    res.amend = AMEND_RE.test(text);
+    // data no texto: 28/11/25, 06/07
+    text = text.replace(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/g, (m, d, mo, y) => {
+      if (res.date) return ' ';
+      d = +d; mo = +mo;
+      let year = y ? (+y < 100 ? 2000 + +y : +y) : (msgDate ? +msgDate.slice(0, 4) : new Date().getFullYear());
+      if (!validDate(year, mo, d)) return m;
+      let ds = ymd(year, mo, d);
+      if (!y && msgDate && dayNum(ds) > dayNum(msgDate) + 1) { year -= 1; ds = ymd(year, mo, d); }
+      res.date = ds; return ' ';
+    });
+    // hora no texto: 14:30, 14h30, 14h
+    text = text.replace(/\b([01]?\d|2[0-3])\s*(?::|h)\s*([0-5]\d)\b|\b([01]?\d|2[0-3])\s*h\b/gi, (m, h1, mi, h2) => {
+      if (res.time) return ' ';
+      res.time = h1 != null ? `${pad2(h1)}:${mi}` : `${pad2(h2)}:00`; return ' ';
+    });
+    // valor: R$ 1.234,56 | valor 1500
+    text = text.replace(/(?:r\$|valor:?|vlr:?)\s*(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?/gi, (m, int, dec) => {
+      if (res.valor == null) res.valor = +(int.replace(/\./g, '') + '.' + (dec || '0')); return ' ';
+    });
+    text = text.replace(WEEKDAY_RE, ' ');
+    const segments = text.split(SPLIT_RE).map((s) => s && s.trim()).filter(Boolean);
+    let lastProc = null;
+    const pendingNames = [];
+    for (const seg of segments) {
+      const toks = tokenize(seg); if (!toks.length) continue;
+      const used = toks.map(() => false);
+      for (const f of scan(toks, index, [T.HOSP, T.COL, T.CONV, T.IGN], used)) {
+        if (f.term.type === T.HOSP && !res.hosp) res.hosp = f.term.name;
+        else if (f.term.type === T.COL && !res.cols.includes(f.term.name)) res.cols.push(f.term.name);
+        else if (f.term.type === T.CONV && !res.conv) res.conv = f.term.name;
+      }
+      const left = toks.map((t, i) => (used[i] ? null : t));
+      const leftToks = left.filter(Boolean);
+      if (!leftToks.length) continue;
+      const leftNorm = leftToks.map((t) => t.n).join(' ');
+      if (/^(vlp|video|videolaparoscopica|videolaparoscopia|por video)$/.test(leftNorm) && lastProc) {
+        const variant = index.phrases.find((p) => p.term.type === T.PROC && p.alias === lastProc.alias + ' vlp');
+        if (variant) {
+          const i = res.procs.indexOf(lastProc.term.name);
+          if (i >= 0) res.procs[i] = variant.term.name;
+          lastProc = { term: variant.term, alias: variant.alias };
+        }
+        continue;
+      }
+      const pUsed = toks.map((t, i) => used[i]);
+      const procs = scan(toks, index, [T.PROC], pUsed);
+      for (const p of procs) {
+        if (p.term.name === 'Videolaparoscopia' && (res.procs.length || procs.length > 1)) {
+          // "VLP" solto junto de outro procedimento: vira modificador
+          const base = lastProc || procs.find((q) => q !== p && q.term.name !== 'Videolaparoscopia');
+          if (base) {
+            const variant = index.phrases.find((ph) => ph.term.type === T.PROC && ph.alias === base.alias + ' vlp');
+            if (variant) {
+              const i = res.procs.indexOf(base.term.name);
+              if (i >= 0) res.procs[i] = variant.term.name; else res.procs.push(variant.term.name);
+              lastProc = { term: variant.term, alias: variant.alias };
+            }
+            continue;
+          }
+        }
+        if (!res.procs.includes(p.term.name)) res.procs.push(p.term.name);
+        lastProc = p;
+      }
+      // sobras
+      const rest = toks.filter((t, i) => !pUsed[i]);
+      if (!rest.length) continue;
+      const restNorm = rest.map((t) => t.n).join(' ');
+      const restOrig = rest.map((t) => t.o).join(' ');
+      if (!procs.length && PROCISH.test(restNorm)) {
+        res.unknown.push({ text: capFirst(restOrig), norm: restNorm, guess: T.PROC });
+        if (!res.procs.includes(capFirst(restOrig))) res.procs.push(capFirst(restOrig));
+        continue;
+      }
+      // possível nome (colega ou hospital) — decide depois, com a frequência
+      const capitalized = rest.every((t) => /^\p{Lu}/u.test(t.o));
+      if (capitalized && rest.length <= 3) {
+        if (rest.length > 1 || rest[0].o.length >= 3) pendingNames.push({ text: restOrig, norm: restNorm, upper: rest.every((t) => t.o === t.o.toUpperCase()) });
+      }
+    }
+    for (const nm of pendingNames) {
+      let guess = T.IGN;
+      if (nm.upper && nm.norm.length <= 5 && !res.hosp) guess = T.HOSP;
+      else if (!res.cols.length) guess = T.COL;
+      res.unknown.push({ text: nm.text, norm: nm.norm, guess });
+    }
+    res.empty = !(res.procs.length || res.hosp || res.cols.length || res.date || res.valor != null);
+    return res;
+  }
+
+  // ---------- conversa exportada do WhatsApp ----------
+  const IOS_HDR = /^\[(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp])\.?\s?[Mm]\.?)?\]\s?(.*)$/;
+  const AND_HDR = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4}),?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp])\.?\s?[Mm]\.?)?\s+[-–]\s+(.*)$/;
+  const ATT_RES = [
+    /<\s*(?:anexado|attached|adjunto|allegato|joint|angeh[aä]ngt)\s*:\s*([^>]+?)\s*>/gi,
+    /([^\s<>:"|?*]+\.(?:jpe?g|png|heic|webp|gif|mp4|mov|pdf|opus|m4a|docx?|xlsx?))\s*\((?:arquivo anexado|file attached|archivo adjunto)\)/gi,
+  ];
+  const OMIT_RE = /(<?\s*(?:imagem ocultada|image omitted|foto ocultada|m[ií]dia oculta|media omitted|v[ií]deo omitido|video omitted|figurinha omitida|sticker omitted|documento omitido|document omitted|gif omitido|[aá]udio ocultado|audio omitted)\s*>?)/gi;
+  const SYSTEM_RE = /(criptografia de ponta a ponta|end-to-end encrypted|criou (este|o) grupo|created (this )?group|adicionou|added you|saiu|left|mudou (o nome|a imagem|a descri)|changed (the|this) group|mensagem foi apagada|message was deleted|mensagem apagada|mensagens tempor[aá]rias|disappearing messages|c[oó]digo de seguran[cç]a)/i;
+  const IMG_EXT = /\.(jpe?g|png|heic|webp)$/i;
+
+  function parseChat(text) {
+    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+    const msgs = [];
+    for (const rawLine of lines) {
+      const line = stripMarks(rawLine);
+      const m = line.match(IOS_HDR) || line.match(AND_HDR);
+      if (!m) { if (msgs.length) msgs[msgs.length - 1].raw += '\n' + line; continue; }
+      const lrm = /:\s?[‎‏]/.test(rawLine);
+      let [, a, b, y, hh, mi, ss, ap, rest] = m;
+      let d = +a, mo = +b; if (mo > 12 && d <= 12) [d, mo] = [mo, d];
+      let year = +y; if (year < 100) year += 2000;
+      let h = +hh; if (ap) { const pm = /p/i.test(ap); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+      const sm = rest.match(/^([^:]{1,80}?):(?:\s|$)([\s\S]*)$/);
+      msgs.push({ date: ymd(year, mo, d), time: `${pad2(h)}:${mi}`, sec: ss ? +ss : 0, sender: sm ? sm[1].trim() : '', raw: sm ? sm[2] : rest, system: !sm, lrm });
+    }
+    let chatName = '';
+    if (msgs.length && SYSTEM_RE.test(msgs[0].raw)) chatName = msgs[0].sender;
+    const seen = new Map();
+    for (const msg of msgs) {
+      let t = msg.raw; const files = [];
+      for (const re of ATT_RES) t = t.replace(re, (all, f) => { files.push(stripMarks(f).trim()); return ' '; });
+      let omitted = 0; t = t.replace(OMIT_RE, () => { omitted++; return ' '; });
+      msg.text = stripMarks(t).replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+      msg.files = files; msg.photos = files.filter((f) => IMG_EXT.test(f)); msg.omitted = omitted;
+      msg.system = msg.system || (msg.lrm && !files.length && !omitted && SYSTEM_RE.test(msg.text));
+      const base = `${msg.date}T${msg.time}:${pad2(msg.sec)}|${norm(msg.text).slice(0, 48)}|${files.length + omitted}`;
+      const n = (seen.get(base) || 0) + 1; seen.set(base, n);
+      msg.key = base + '#' + n;
+      delete msg.raw; delete msg.lrm;
+    }
+    return { chatName, messages: msgs };
+  }
+
+  /** Agrupa mensagens em cirurgias (legenda + fotos) e fotos sem legenda. */
+  function groupMessages(messages) {
+    const entries = []; const loose = []; let pending = []; let last = null;
+    const tmin = (m) => minutesOf(m.date, m.time) + m.sec / 60;
+    const flush = () => { for (const p of pending) loose.push(p); pending = []; };
+    const hasMedia = (m) => m.photos.length || m.omitted;
+    for (const m of messages) {
+      if (m.system) continue;
+      const media = hasMedia(m); const txt = m.text;
+      if (!media && !txt) continue;
+      if (media && txt) {
+        const ent = { key: m.key, date: m.date, time: m.time, sec: m.sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m) };
+        const recent = pending.filter((p) => tmin(m) - tmin(p) <= 5);
+        pending = pending.filter((p) => !recent.includes(p)); flush();
+        for (const p of recent) { ent.photos.push(...p.photos); ent.omitted += p.omitted; }
+        ent.photos.push(...m.photos); ent.omitted += m.omitted;
+        entries.push(ent); last = ent; continue;
+      }
+      if (media) {
+        if (last && tmin(m) - last.t <= 2 && !pending.length) { last.photos.push(...m.photos); last.omitted += m.omitted; last.t = tmin(m); continue; }
+        if (last && last.textOnly && !last.photos.length && tmin(m) - last.t <= 5) { last.photos.push(...m.photos); last.omitted += m.omitted; last.t = tmin(m); continue; }
+        if (pending.length && tmin(m) - tmin(pending[pending.length - 1]) > 5) flush();
+        pending.push(m); continue;
+      }
+      // só texto
+      if (AMEND_RE.test(txt) && last && last.date === m.date && tmin(m) - last.t <= 6 * 60) { last.amends.push({ key: m.key, text: txt }); continue; }
+      if (pending.length && tmin(m) - tmin(pending[pending.length - 1]) <= 15) {
+        const ent = { key: m.key, date: pending[0].date, time: pending[0].time, sec: pending[0].sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m) };
+        for (const p of pending) { ent.photos.push(...p.photos); ent.omitted += p.omitted; }
+        pending = []; entries.push(ent); last = ent; continue;
+      }
+      flush();
+      const ent = { key: m.key, date: m.date, time: m.time, sec: m.sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m), textOnly: true };
+      entries.push(ent); last = ent;
+    }
+    flush();
+    return { entries, loose: loose.map((m) => ({ key: m.key, date: m.date, time: m.time, photos: m.photos, omitted: m.omitted })) };
+  }
+
+  /** Conta termos desconhecidos em todas as legendas e decide o palpite por frequência. */
+  function collectUnknown(entries, index) {
+    const map = new Map();
+    for (const e of entries) {
+      const p = parseCaption(e.caption, index, e.date);
+      for (const u of p.unknown) {
+        const cur = map.get(u.norm) || { text: u.text, norm: u.norm, count: 0, guesses: {} };
+        cur.count++; cur.guesses[u.guess] = (cur.guesses[u.guess] || 0) + 1; map.set(u.norm, cur);
+      }
+    }
+    const out = [];
+    for (const u of map.values()) {
+      let guess = Object.entries(u.guesses).sort((a, b) => b[1] - a[1])[0][0];
+      if (guess === T.COL && u.count < 2 && u.norm.includes(' ')) guess = T.IGN; // nome composto que aparece uma vez: anotação
+      if (guess !== T.IGN) out.push({ text: u.text, norm: u.norm, count: u.count, guess });
+    }
+    return out.sort((a, b) => b.count - a.count);
+  }
+
+  function recordFromEntry(e, index, opts) {
+    opts = opts || {};
+    const p = parseCaption(e.caption, index, e.date);
+    const rec = {
+      id: uid('r'), key: e.key, origem: 'whatsapp', grupo: opts.chatName || '',
+      date: p.date || e.date, time: p.date ? (p.time || null) : (p.time || e.time),
+      msgDate: e.date, msgTime: e.time,
+      procs: p.procs.slice(), hosp: p.hosp, cols: p.cols.slice(), conv: p.conv, funcao: null,
+      valorPrevisto: p.valor, status: 'aberto', recebido: null, rep: [],
+      caption: e.caption, notas: '', photoIds: [], photoNames: e.photos.slice(), omitted: e.omitted || 0,
+      revisar: [], createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    for (const a of e.amends || []) {
+      const q = parseCaption(a.text, index, e.date);
+      rec.caption += '\n' + a.text;
+      if (q.procs.length) rec.procs = q.procs.slice();
+      rec.notas = (rec.notas ? rec.notas + '\n' : '') + a.text;
+      rec.revisar.push('Conversão ou observação — confira o procedimento');
+    }
+    if (!rec.procs.length) rec.revisar.push('Sem procedimento');
+    if (p.unknown.some((u) => u.guess === T.PROC)) rec.revisar.push('Procedimento novo');
+    return rec;
+  }
+
+  // ---------- zip ----------
+  async function zipOpen(blob) {
+    const size = blob.size; const tailLen = Math.min(size, 65557);
+    const tail = new Uint8Array(await blob.slice(size - tailLen).arrayBuffer());
+    let e = -1;
+    for (let i = tail.length - 22; i >= 0; i--) if (tail[i] === 0x50 && tail[i + 1] === 0x4b && tail[i + 2] === 5 && tail[i + 3] === 6) { e = i; break; }
+    if (e < 0) throw new Error('Este arquivo não é um .zip válido.');
+    const dv = new DataView(tail.buffer, tail.byteOffset, tail.byteLength);
+    let count = dv.getUint16(e + 10, true), cdSize = dv.getUint32(e + 12, true), cdOff = dv.getUint32(e + 16, true);
+    if (count === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {
+      const lp = e - 20;
+      if (lp >= 0 && dv.getUint32(lp, true) === 0x07064b50) {
+        const off = Number(dv.getBigUint64(lp + 8, true));
+        const z = new DataView(await blob.slice(off, off + 56).arrayBuffer());
+        if (z.getUint32(0, true) === 0x06064b50) { count = Number(z.getBigUint64(32, true)); cdSize = Number(z.getBigUint64(40, true)); cdOff = Number(z.getBigUint64(48, true)); }
+      }
+    }
+    const cd = new Uint8Array(await blob.slice(cdOff, cdOff + cdSize).arrayBuffer());
+    const c = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+    const entries = []; let p = 0; const td = new TextDecoder('utf-8');
+    while (p + 46 <= cd.length && c.getUint32(p, true) === 0x02014b50) {
+      const method = c.getUint16(p + 10, true);
+      let csize = c.getUint32(p + 20, true), usize = c.getUint32(p + 24, true), off = c.getUint32(p + 42, true);
+      const nlen = c.getUint16(p + 28, true), xlen = c.getUint16(p + 30, true), clen = c.getUint16(p + 32, true);
+      const name = td.decode(cd.subarray(p + 46, p + 46 + nlen));
+      let x = p + 46 + nlen; const xend = x + xlen;
+      while (x + 4 <= xend) {
+        const id = c.getUint16(x, true), sz = c.getUint16(x + 2, true);
+        if (id === 1) {
+          let q = x + 4;
+          if (usize === 0xffffffff) { usize = Number(c.getBigUint64(q, true)); q += 8; }
+          if (csize === 0xffffffff) { csize = Number(c.getBigUint64(q, true)); q += 8; }
+          if (off === 0xffffffff) { off = Number(c.getBigUint64(q, true)); q += 8; }
+        }
+        x += 4 + sz;
+      }
+      if (!name.endsWith('/')) entries.push({ name, base: name.split('/').pop(), method, csize, usize, off });
+      p = xend + clen;
+    }
+    return { blob, entries };
+  }
+  async function zipEntryBlob(zip, entry, type) {
+    const lh = new DataView(await zip.blob.slice(entry.off, entry.off + 30).arrayBuffer());
+    if (lh.getUint32(0, true) !== 0x04034b50) throw new Error('Arquivo .zip corrompido.');
+    const start = entry.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+    const data = zip.blob.slice(start, start + entry.csize);
+    if (entry.method === 0) return type ? new Blob([data], { type }) : data;
+    if (entry.method === 8) {
+      if (typeof DecompressionStream === 'undefined') throw new Error('Este aparelho não consegue abrir .zip (atualize o iOS).');
+      const out = await new Response(data.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob();
+      return type ? new Blob([out], { type }) : out;
+    }
+    throw new Error('Formato de compressão não suportado no .zip.');
+  }
+  const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(u8) { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+  /** files: [{name, data: Uint8Array|string|Blob}] → Blob .zip (sem compressão) */
+  async function zipWrite(files, now) {
+    const te = new TextEncoder(); const parts = []; const central = []; let offset = 0;
+    const d = now || new Date();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    for (const f of files) {
+      const name = te.encode(f.name);
+      let data = f.data;
+      if (typeof data === 'string') data = te.encode(data);
+      else if (typeof Blob !== 'undefined' && data instanceof Blob) data = new Uint8Array(await data.arrayBuffer());
+      const crc = crc32(data);
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true);
+      lh.setUint16(10, dosTime, true); lh.setUint16(12, dosDate, true); lh.setUint32(14, crc, true);
+      lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+      parts.push(new Uint8Array(lh.buffer), name, data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true);
+      ch.setUint16(12, dosTime, true); ch.setUint16(14, dosDate, true); ch.setUint32(16, crc, true);
+      ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true); ch.setUint16(28, name.length, true);
+      ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    const cdSize = central.reduce((s, u) => s + u.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+    return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+  }
+
+  // ---------- planilha .xlsx (repasse) ----------
+  function xmlDecode(s) {
+    return String(s).replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  }
+  const attr = (tag, name) => { const m = tag.match(new RegExp('\\b' + name + '="([^"]*)"')); return m ? m[1] : null; };
+  function colIndex(ref) { const L = ref.match(/^[A-Z]+/)[0]; let n = 0; for (const ch of L) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; }
+  async function readXlsx(blob) {
+    const z = await zipOpen(blob);
+    const txt = async (name) => { const e = z.entries.find((x) => x.name === name || x.name === '/' + name); return e ? (await zipEntryBlob(z, e)).text() : null; };
+    const wb = await txt('xl/workbook.xml');
+    const rels = await txt('xl/_rels/workbook.xml.rels');
+    let sheetPath = 'xl/worksheets/sheet1.xml';
+    const st = wb && wb.match(/<sheet\b[^>]*>/);
+    if (st && rels) {
+      const rid = attr(st[0], 'r:id');
+      for (const rm of rels.match(/<Relationship\b[^>]*>/g) || []) {
+        if (attr(rm, 'Id') === rid) { const tg = attr(rm, 'Target'); sheetPath = tg.startsWith('/') ? tg.slice(1) : 'xl/' + tg.replace(/^\.\//, ''); }
+      }
+    }
+    const ss = [];
+    const ssx = await txt('xl/sharedStrings.xml');
+    if (ssx) for (const m of ssx.matchAll(/<si\b[^>]*>([\s\S]*?)<\/si>/g)) {
+      ss.push(xmlDecode([...m[1].matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join('')));
+    }
+    const sx = await txt(sheetPath);
+    if (!sx) throw new Error('Planilha vazia ou em formato não reconhecido.');
+    const rows = [];
+    for (const rm of sx.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+      const row = [];
+      for (const cm of rm[1].matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
+        const a = cm[1]; const inner = cm[2] || ''; const ref = attr('<c ' + a, 'r'); const t = attr('<c ' + a, 't');
+        if (!ref) continue;
+        let v = null; const vm = inner.match(/<v>([\s\S]*?)<\/v>/);
+        if (t === 's') v = vm ? ss[+vm[1]] : null;
+        else if (t === 'inlineStr') v = xmlDecode([...inner.matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((x) => x[1]).join(''));
+        else if (t === 'str' || t === 'd') v = vm ? xmlDecode(vm[1]) : null;
+        else if (t === 'b') v = vm ? vm[1] === '1' : null;
+        else v = vm ? +vm[1] : null;
+        row[colIndex(ref)] = v;
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+  function excelDate(v) {
+    if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000) {
+      const ms = Math.round(v * 86400000); const dt = new Date(Date.UTC(1899, 11, 30) + ms);
+      return { date: ymd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate()), time: `${pad2(dt.getUTCHours())}:${pad2(dt.getUTCMinutes())}` };
+    }
+    const s = String(v || '').trim();
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2}))?/);
+    if (m) { let y = +m[3]; if (y < 100) y += 2000; if (validDate(y, +m[2], +m[1])) return { date: ymd(y, +m[2], +m[1]), time: m[4] ? `${pad2(m[4])}:${m[5]}` : null }; }
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+    if (m && validDate(+m[1], +m[2], +m[3])) return { date: ymd(+m[1], +m[2], +m[3]), time: m[4] ? `${m[4]}:${m[5]}` : null };
+    return null;
+  }
+  function toNumber(v) {
+    if (typeof v === 'number') return v;
+    const s = String(v || '').replace(/[R$\s]/g, '');
+    if (!s) return null;
+    const n = /,\d{1,2}$/.test(s) ? +s.replace(/\./g, '').replace(',', '.') : +s.replace(/,/g, '');
+    return isFinite(n) ? n : null;
+  }
+  const HEADERS = {
+    data: ['data procedimento', 'data do procedimento', 'dt procedimento', 'data realizacao', 'data atendimento', 'data'],
+    convenio: ['convenio', 'operadora', 'plano'],
+    codigo: ['codigo', 'cod', 'codigo tuss', 'tuss'],
+    procedimento: ['procedimento', 'descricao procedimento', 'descricao'],
+    valor: ['liberado', 'valor liberado', 'valor pago', 'vl liberado', 'valor repasse', 'valor'],
+    funcao: ['funcao medico', 'funcao', 'grau participacao', 'participacao'],
+    executor: ['medico executor', 'executor', 'cirurgiao principal', 'cirurgiao', 'medico responsavel'],
+  };
+  /** Lê as linhas do repasse. Descarta colunas de paciente, atendimento e conta. */
+  function parseRepasse(rows, fileName) {
+    let hi = -1, map = null;
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+      const cells = (rows[i] || []).map((c) => norm(c));
+      const m = {};
+      for (const [k, names] of Object.entries(HEADERS)) {
+        let idx = -1;
+        for (const nm of names) { idx = cells.findIndex((c) => c === nm); if (idx >= 0) break; }
+        if (idx < 0 && k !== 'data' && k !== 'valor') for (const nm of names) { idx = cells.findIndex((c) => c && c.includes(nm) && !c.includes('paciente')); if (idx >= 0) break; }
+        if (idx >= 0) m[k] = idx;
+      }
+      if (m.data != null && m.procedimento != null && m.valor != null) { hi = i; map = m; break; }
+    }
+    if (hi < 0) throw new Error('Não encontrei as colunas de data, procedimento e valor nesta planilha.');
+    const lines = [];
+    for (let i = hi + 1; i < rows.length; i++) {
+      const r = rows[i] || [];
+      const dt = excelDate(r[map.data]); const valor = toNumber(r[map.valor]);
+      if (!dt || valor == null) continue;
+      lines.push({
+        date: dt.date, time: dt.time, valor: round2(valor),
+        conv: map.convenio != null && r[map.convenio] ? String(r[map.convenio]).trim() : null,
+        cod: map.codigo != null && r[map.codigo] != null ? String(r[map.codigo]).trim() : null,
+        proc: String(r[map.procedimento] || '').replace(/\s+/g, ' ').trim(),
+        funcao: map.funcao != null && r[map.funcao] ? String(r[map.funcao]).trim() : null,
+        exec: map.executor != null && r[map.executor] ? String(r[map.executor]).replace(/\s+/g, ' ').trim() : null,
+      });
+    }
+    const name = String(fileName || '');
+    const num = (name.match(/repasse\D{0,5}(\d{3,})/i) || [])[1] || null;
+    const comp = (name.match(/comp[^a-z0-9]{0,3}(\d{1,2}(?:[\/.-]\d{2,4})?)/i) || [])[1] || null;
+    const total = round2(lines.reduce((s, l) => s + l.valor, 0));
+    const sig = lines.map((l) => `${l.date}${l.time}${l.cod}${l.valor}`).join('|');
+    let h = 0; for (let i = 0; i < sig.length; i++) h = (h * 31 + sig.charCodeAt(i)) | 0;
+    return { id: num ? 'rep' + num : 'rep' + (h >>> 0).toString(36), numero: num, comp, nome: name, lines, total };
+  }
+
+  // ---------- termos: procedimento do repasse e médico executor ----------
+  function mapRepasseProc(name, index) {
+    const n = norm(name);
+    let best = null, bestScore = 0;
+    for (const t of index.terms) {
+      if (t.type !== T.PROC) continue;
+      const aliases = [norm(t.name), ...(t.aliases || [])];
+      if (aliases.includes(n)) return t;
+      for (const kw of t.kw || []) {
+        if (kw.length && kw.every((w) => n.includes(w))) {
+          const sc = kw.length * 10 + kw.join('').length;
+          if (sc > bestScore) { best = t; bestScore = sc; }
+        }
+      }
+    }
+    return best;
+  }
+  function mapExecutor(full, index) {
+    if (!full) return null;
+    const n = norm(full); const first = n.split(' ')[0];
+    const cols = index.terms.filter((t) => t.type === T.COL);
+    for (const t of cols) if ([norm(t.name), ...(t.aliases || [])].includes(n)) return { term: t, how: 'exato' };
+    for (const t of cols) for (const a of [norm(t.name), ...(t.aliases || [])]) if (a && (n.startsWith(a + ' ') || a.split(' ')[0] === first && a.length > 2)) return { term: t, how: 'nome' };
+    for (const t of cols) for (const a of [norm(t.name), ...(t.aliases || [])]) {
+      const af = a.split(' ')[0];
+      if (af.length >= 4 && first.length >= 4 && levenshtein(af, first) <= 1) return { term: t, how: 'parecido' };
+    }
+    return null;
+  }
+
+  // ---------- cruzamento repasse x cirurgias ----------
+  function groupActs(lines) {
+    const acts = new Map();
+    for (const l of lines) {
+      const k = `${l.date}|${l.time || ''}|${norm(l.exec || '')}`;
+      if (!acts.has(k)) acts.set(k, { date: l.date, time: l.time, exec: l.exec, lines: [] });
+      acts.get(k).lines.push(l);
+    }
+    return [...acts.values()];
+  }
+  function scorePair(act, rec, ctx) {
+    const dd = Math.abs(dayNum(act.date) - dayNum(rec.date));
+    if (dd > 1) return -99;
+    let s = dd === 0 ? 4 : 1; const why = [];
+    if (act.col && rec.cols && rec.cols.length) { if (rec.cols.includes(act.col)) { s += 4; why.push('colega'); } else s -= 4; }
+    if (rec.procs && rec.procs.length && act.procNames.length) {
+      const exact = act.procNames.some((p) => rec.procs.includes(p));
+      const fams = new Set(act.procNames.map((p) => famOf(ctx.index, p)));
+      const fam = rec.procs.some((p) => fams.has(famOf(ctx.index, p)));
+      if (exact) { s += 3; why.push('procedimento'); } else if (fam) { s += 2; why.push('procedimento'); } else s -= 2;
+    }
+    if (act.time && rec.time && dd === 0) {
+      const dm = Math.abs(minutesOf(act.date, act.time) - minutesOf(rec.date, rec.time));
+      if (dm <= 90) s += 2; else if (dm <= 240) s += 1;
+    }
+    if (ctx.hosp && rec.hosp && rec.hosp !== ctx.hosp) s -= 3;
+    return s;
+  }
+  /** Propõe pares ato-do-repasse ↔ cirurgia em aberto. Não grava nada. */
+  function planRepasse(rep, records, index, opts) {
+    opts = opts || {};
+    const acts = groupActs(rep.lines);
+    for (const a of acts) {
+      const m = mapExecutor(a.exec, index);
+      a.col = m ? m.term.name : null; a.colHow = m ? m.how : null;
+      a.procNames = a.lines.map((l) => { const t = mapRepasseProc(l.proc, index); return t ? t.name : sentenceCase(l.proc); });
+      a.valor = round2(a.lines.reduce((s, l) => s + l.valor, 0));
+    }
+    const open = records.filter((r) => r.status === 'aberto');
+    const pairs = [];
+    acts.forEach((a, ai) => open.forEach((r) => { const sc = scorePair(a, r, { index, hosp: opts.hosp }); if (sc >= 5) pairs.push({ ai, r, sc }); }));
+    pairs.sort((x, y) => y.sc - x.sc || Math.abs(minutesOf(acts[x.ai].date, acts[x.ai].time) - minutesOf(x.r.date, x.r.time)) - Math.abs(minutesOf(acts[y.ai].date, acts[y.ai].time) - minutesOf(y.r.date, y.r.time)));
+    const usedA = new Set(), usedR = new Set();
+    for (const p of pairs) {
+      if (usedA.has(p.ai) || usedR.has(p.r.id)) continue;
+      usedA.add(p.ai); usedR.add(p.r.id);
+      acts[p.ai].recordId = p.r.id; acts[p.ai].score = p.sc; acts[p.ai].certeza = p.sc >= 9 ? 'alta' : 'confira';
+    }
+    for (const a of acts) if (!a.recordId) { a.recordId = null; a.certeza = 'novo'; }
+    return acts;
+  }
+
+  // ---------- estimativas ----------
+  function buildRefs(records, extraHol) {
+    const byProc = new Map(), byFam = new Map(), byProcConv = new Map();
+    const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+    for (const r of records) {
+      if (!r.rep || !r.rep.length) continue;
+      const acts = groupActs(r.rep);
+      for (const a of acts) {
+        if (a.lines.length !== 1) continue; // atos com vários procedimentos têm redução; ficam fora da referência
+        const l = a.lines[0]; if (!l.procName || !(l.valor > 0)) continue;
+        const urg = isUrgent(l.date, l.time, extraHol);
+        const base = l.valor / (urg ? 1.3 : 1);
+        push(byProc, l.procName, base); push(byFam, l.fam || norm(l.procName).split(' ')[0], base);
+        if (l.conv) push(byProcConv, l.procName + '|' + l.conv, { base, urg, valor: l.valor, recId: r.id });
+      }
+    }
+    return { byProc, byFam, byProcConv };
+  }
+  function estimate(rec, refs, index, extraHol) {
+    if (!rec.procs || !rec.procs.length) return null;
+    const bases = []; let missing = 0;
+    for (const p of rec.procs) {
+      const exact = refs.byProc.get(p); const fam = refs.byFam.get(famOf(index, p));
+      const v = exact ? median(exact) : fam ? median(fam) : null;
+      if (v == null) missing++; else bases.push(v);
+    }
+    if (!bases.length) return { valor: null, parcial: true, faltam: missing };
+    bases.sort((a, b) => b - a);
+    let total = bases[0] + bases.slice(1).reduce((s, v) => s + v * 0.5, 0);
+    if (isUrgent(rec.date, rec.time, extraHol)) total *= 1.3;
+    return { valor: round2(total), parcial: missing > 0, faltam: missing };
+  }
+  /** Cirurgia em horário de urgência paga pelo valor de horário normal (mesmo procedimento e convênio). */
+  function urgencyChecks(records, refs, extraHol) {
+    const out = [];
+    for (const [k, arr] of refs.byProcConv) {
+      const normal = arr.filter((x) => !x.urg).map((x) => x.base);
+      const base = normal.length ? median(normal) : null;
+      if (base == null) continue;
+      for (const x of arr) if (x.urg && Math.abs(x.valor - base) / base < 0.02) out.push({ recId: x.recId, chave: k, pago: x.valor, esperado: round2(base * 1.3) });
+    }
+    return out;
+  }
+
+  const api = {
+    norm, stripMarks, pad2, ymd, dayNum, fromDayNum, minutesOf, weekday, todayStr, median, round2, uid, capFirst, sentenceCase, levenshtein,
+    easter, isHoliday, isUrgent, parseExtraHolidays, T, TYPE_LABEL, defaultTerms, buildIndex, famOf,
+    parseCaption, parseChat, groupMessages, collectUnknown, recordFromEntry,
+    zipOpen, zipEntryBlob, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
+    mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
+})(typeof self !== 'undefined' ? self : this);
+
+</script>
+<script>
+/* Registro de Cirurgias — interface. Depende de Core (core.js). */
+(function () {
+  'use strict';
+  const C = window.Core;
+  const PREVIEW = window.APP_MODE === 'preview';
+  const VERSION = '1.0';
+  const TERMS_VERSION = 1;
+  const $ = (s, el) => (el || document).querySelector(s);
+
+  // ================= DOM =================
+  function h(tag, props, ...kids) {
+    const el = document.createElement(tag);
+    let value;
+    if (props) for (const [k, v] of Object.entries(props)) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k === 'value') value = v;
+      else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+      else if (k === 'checked' || k === 'disabled' || k === 'selected' || k === 'multiple') el[k] = !!v;
+      else el.setAttribute(k, v === true ? '' : String(v));
+    }
+    for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    if (value !== undefined) el.value = value;
+    return el;
+  }
+  const ICONS = {
+    home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9v11h4.5v-6h4v6h4.5V9"/>',
+    list: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="3"/>',
+    chart: '<path d="M5 20v-8M10.5 20V5M16 20v-5M21 20H3"/>',
+    gear: '<path d="M4 7h9M17 7h3M4 12h3M11 12h9M4 17h11M19 17h1"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/>',
+    import: '<path d="M12 3v11M7.5 9.5 12 14l4.5-4.5"/><path d="M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    cash: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.5 9.5h.01M17.5 14.5h.01" stroke-width="2.6"/>',
+    lock: '<rect x="5" y="11" width="14" height="9.5" rx="2"/><path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3"/>',
+    camera: '<path d="M4 8h3.2l1.8-2.6h6l1.8 2.6H20v11H4z"/><circle cx="12" cy="13.2" r="3.4"/>',
+    moon: '<path d="M19.5 14.6A7.6 7.6 0 1 1 9.4 4.5a6 6 0 0 0 10.1 10.1z"/>',
+    check: '<path d="M5 12.5 9.5 17 19 7.5"/>',
+    x: '<path d="M6 6l12 12M18 6 6 18"/>',
+    back: '<path d="M15 5l-7 7 7 7"/>',
+    chev: '<path d="M9 5l7 7-7 7"/>',
+    trash: '<path d="M4 7h16M10 11v6M14 11v6M6.5 7l1 13h9l1-13M9.5 7V4h5v3"/>',
+    merge: '<path d="M6 4v5a6 6 0 0 0 6 6h6"/><path d="M15 12l3 3-3 3"/><path d="M6 20v-3"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    alert: '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4.2M12 16.8h.01"/>',
+    photo: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 15.5l-5-5L7 19"/>',
+    share: '<path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12.5V19a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6.5"/>',
+    zoom: '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5 20 20M11 8.5v5M8.5 11h5"/>',
+    phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+    tag: '<path d="M3.5 12.5V4.5h8l9 9-8 8z"/><circle cx="8" cy="9" r="1.4"/>',
+    file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+    undo: '<path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.5h9.5a5 5 0 0 1 0 10H11"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8h.01"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  };
+  function icon(name, cls) {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ic' + (cls ? ' ' + cls : '')); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = ICONS[name] || ''; return s;
+  }
+
+  // ================= formatação =================
+  const MES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+  const MES_LONGO = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const DIA = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+  const nf2 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const nf0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+  const brl = (v) => (v == null ? '—' : 'R$ ' + nf2.format(v));
+  const brl0 = (v) => (v == null ? '—' : 'R$ ' + nf0.format(Math.round(v)));
+  const ddmm = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : '');
+  const ddmmyyyy = (d) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : '—');
+  const monthLabel = (k) => `${MES_LONGO[+k.slice(5, 7) - 1]} ${k.slice(0, 4)}`;
+  const monthShort = (k) => `${MES[+k.slice(5, 7) - 1]}/${k.slice(2, 4)}`;
+  const today = () => C.todayStr();
+  const daysSince = (d) => C.dayNum(today()) - C.dayNum(d);
+  const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+  function parseMoney(s) {
+    s = String(s == null ? '' : s).replace(/[R$\s]/g, '');
+    if (!s) return null;
+    const n = /,\d{1,2}$/.test(s) || (s.includes(',') && !s.includes('.')) ? +s.replace(/\./g, '').replace(',', '.') : +s.replace(/,/g, '');
+    return isFinite(n) ? C.round2(n) : null;
+  }
+  const moneyInput = (v) => (v == null ? '' : nf2.format(v));
+  const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+
+  // ================= armazenamento =================
+  const STORES = ['records', 'photos', 'loose', 'terms', 'repasses', 'meta', 'ignored'];
+  const KEYS = { meta: 'k', ignored: 'key' };
+  const Store = (() => {
+    let db = null, mem = null;
+    const useMem = () => { mem = {}; STORES.forEach((s) => (mem[s] = new Map())); };
+    async function open() {
+      if (PREVIEW || !('indexedDB' in window)) { useMem(); return 'memory'; }
+      try {
+        db = await new Promise((res, rej) => {
+          const rq = indexedDB.open('registro-cirurgias', 1);
+          rq.onupgradeneeded = () => { const d = rq.result; for (const s of STORES) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: KEYS[s] || 'id' }); };
+          rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
+        });
+        return 'idb';
+      } catch (e) { useMem(); return 'memory'; }
+    }
+    const keyOf = (s, v) => v[KEYS[s] || 'id'];
+    function run(s, mode, fn) {
+      return new Promise((res, rej) => {
+        const t = db.transaction(s, mode); const st = t.objectStore(s); const rq = fn(st);
+        t.oncomplete = () => res(rq ? rq.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('abort'));
+      });
+    }
+    return {
+      open,
+      get mode() { return mem ? 'memory' : 'idb'; },
+      all: (s) => (mem ? Promise.resolve([...mem[s].values()]) : run(s, 'readonly', (st) => st.getAll())),
+      get: (s, k) => (mem ? Promise.resolve(mem[s].get(k)) : run(s, 'readonly', (st) => st.get(k))),
+      put: (s, v) => (mem ? (mem[s].set(keyOf(s, v), v), Promise.resolve()) : run(s, 'readwrite', (st) => st.put(v))),
+      putMany: (s, arr) => (mem ? (arr.forEach((v) => mem[s].set(keyOf(s, v), v)), Promise.resolve()) : (arr.length ? run(s, 'readwrite', (st) => { arr.forEach((v) => st.put(v)); return null; }) : Promise.resolve())),
+      del: (s, k) => (mem ? (mem[s].delete(k), Promise.resolve()) : run(s, 'readwrite', (st) => st.delete(k))),
+      clear: (s) => (mem ? (mem[s].clear(), Promise.resolve()) : run(s, 'readwrite', (st) => st.clear())),
+    };
+  })();
+
+  // ================= estado =================
+  const DEFAULT_SETTINGS = { k: 'settings', alertDias: 90, feriados: '31/08', pinHash: null, pinSalt: null, lastBackup: null, seq: 0, hospRepasse: null, termsVersion: 0, installHidden: false };
+  const S = {
+    records: [], terms: [], repasses: [], loose: [], ignored: new Set(), settings: { ...DEFAULT_SETTINGS },
+    index: null, refs: null, hol: [], checks: [], tab: 'inicio', demo: false, storage: 'idb',
+    f: { q: '', status: 'todas', periodo: 'tudo', col: '', hosp: '', conv: '' }, selecting: false, sel: new Set(), relTab: 'mes',
+  };
+  async function load() {
+    S.storage = await Store.open();
+    const [records, terms, repasses, loose, meta, ignored] = await Promise.all(['records', 'terms', 'repasses', 'loose', 'meta', 'ignored'].map((s) => Store.all(s)));
+    S.records = records; S.repasses = repasses; S.loose = loose; S.ignored = new Set(ignored.map((x) => x.key));
+    S.settings = { ...DEFAULT_SETTINGS, ...(meta.find((m) => m.k === 'settings') || {}) };
+    S.terms = terms;
+    if ((S.settings.termsVersion || 0) < TERMS_VERSION) {
+      const have = new Set(S.terms.map((t) => t.type + '|' + t.name));
+      const add = C.defaultTerms().filter((t) => !have.has(t.type + '|' + t.name));
+      S.terms.push(...add); await Store.putMany('terms', add);
+      S.settings.termsVersion = TERMS_VERSION; await saveSettings();
+    }
+    derive();
+  }
+  function derive() {
+    S.index = C.buildIndex(S.terms);
+    S.hol = C.parseExtraHolidays(S.settings.feriados);
+    S.refs = C.buildRefs(S.records, S.hol);
+    S.checks = C.urgencyChecks(S.records, S.refs, S.hol);
+  }
+  const saveSettings = () => Store.put('meta', S.settings);
+  async function saveRecord(r) {
+    r.updatedAt = Date.now();
+    const i = S.records.findIndex((x) => x.id === r.id);
+    if (i >= 0) S.records[i] = r; else S.records.push(r);
+    await Store.put('records', r);
+  }
+  function persistStorage() { try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* sem suporte */ } }
+  const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+
+  // ================= fotos =================
+  const urlCache = new Map();
+  function extType(name) {
+    const e = (String(name).split('.').pop() || '').toLowerCase();
+    return { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', heic: 'image/heic', webp: 'image/webp', gif: 'image/gif' }[e] || 'image/jpeg';
+  }
+  function loadImage(blob) {
+    return new Promise((res, rej) => { const u = URL.createObjectURL(blob); const im = new Image(); im.onload = () => { res(im); setTimeout(() => URL.revokeObjectURL(u), 1000); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('img')); }; im.src = u; });
+  }
+  async function makeThumb(blob, max) {
+    let src = null;
+    if ('createImageBitmap' in window) { try { src = await createImageBitmap(blob); } catch (e) { src = null; } }
+    if (!src) src = await loadImage(blob);
+    const w = src.width, hh = src.height, sc = Math.min(1, (max || 360) / Math.max(w, hh));
+    const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(w * sc)); cv.height = Math.max(1, Math.round(hh * sc));
+    cv.getContext('2d').drawImage(src, 0, 0, cv.width, cv.height);
+    if (src.close) src.close();
+    return new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error('thumb'))), 'image/jpeg', 0.72));
+  }
+  async function storePhoto(blob, name) {
+    const id = C.uid('p');
+    const type = blob.type || extType(name);
+    const buf = await blob.arrayBuffer();
+    let tbuf = null;
+    try { tbuf = await (await makeThumb(new Blob([buf], { type }), 360)).arrayBuffer(); } catch (e) { tbuf = null; }
+    await Store.put('photos', { id, name: name || '', type, buf, tbuf });
+    return id;
+  }
+  async function photoURL(id, thumb) {
+    const k = id + (thumb ? ':t' : '');
+    if (urlCache.has(k)) return urlCache.get(k);
+    const p = await Store.get('photos', id);
+    if (!p) return null;
+    const buf = thumb && p.tbuf ? p.tbuf : p.buf;
+    const u = URL.createObjectURL(new Blob([buf], { type: thumb && p.tbuf ? 'image/jpeg' : p.type }));
+    urlCache.set(k, u); return u;
+  }
+  function photoImg(id, thumb) {
+    const im = h('img', { alt: '', loading: 'lazy', decoding: 'async' });
+    photoURL(id, thumb).then((u) => { if (u) im.src = u; });
+    return im;
+  }
+  async function deletePhotos(ids) {
+    for (const id of ids || []) {
+      await Store.del('photos', id);
+      for (const k of [id, id + ':t']) if (urlCache.has(k)) { URL.revokeObjectURL(urlCache.get(k)); urlCache.delete(k); }
+    }
+  }
+
+  // ================= regras de exibição =================
+  const isOpen = (r) => r.status === 'aberto';
+  const urgOf = (r) => C.isUrgent(r.date, r.time, S.hol);
+  const isLate = (r) => isOpen(r) && daysSince(r.date) > S.settings.alertDias;
+  const needsReview = (r) => r.revisar && r.revisar.length > 0;
+  function valueOf(r) {
+    if (r.status === 'recebido') return { v: r.recebido ? r.recebido.valor : null, kind: 'recebido' };
+    if (r.status === 'semcobranca') return { v: 0, kind: 'semcobranca' };
+    if (r.valorPrevisto != null) return { v: r.valorPrevisto, kind: 'previsto' };
+    const e = C.estimate(r, S.refs, S.index, S.hol);
+    if (e && e.valor != null) return { v: e.valor, kind: 'estimado', parcial: e.parcial };
+    return { v: null, kind: 'semvalor' };
+  }
+  const procText = (r) => (r.procs && r.procs.length ? r.procs.join(' + ') : 'Procedimento não informado');
+  const namesOf = (type) => S.terms.filter((t) => t.type === type).map((t) => t.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  function metrics() {
+    const open = S.records.filter(isOpen);
+    let aReceber = 0, semValor = 0;
+    const b = [0, 0, 0, 0], bn = [0, 0, 0, 0];
+    for (const r of open) {
+      const v = valueOf(r); const d = daysSince(r.date); const i = d <= 30 ? 0 : d <= 60 ? 1 : d <= 90 ? 2 : 3;
+      bn[i]++; if (v.v != null) { aReceber += v.v; b[i] += v.v; } else semValor++;
+    }
+    const mes = today().slice(0, 7), ano = today().slice(0, 4);
+    const rec = S.records.filter((r) => r.status === 'recebido' && r.recebido && r.recebido.data);
+    const sum = (arr) => arr.reduce((s, r) => s + (r.recebido.valor || 0), 0);
+    return {
+      open: open.length, aReceber: C.round2(aReceber), semValor, buckets: b, bucketN: bn,
+      recMes: sum(rec.filter((r) => r.recebido.data.startsWith(mes))), recAno: sum(rec.filter((r) => r.recebido.data.startsWith(ano))),
+      cxMes: S.records.filter((r) => r.date.startsWith(mes)).length,
+      late: open.filter(isLate).length, review: S.records.filter(needsReview).length, loose: S.loose.length, checks: S.checks.length,
+    };
+  }
+
+  // ================= componentes =================
+  function toast(msg, ms) {
+    const t = $('#toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), ms || 3200);
+  }
+  function confirmDialog(o) {
+    return new Promise((res) => {
+      const done = (v) => { wrap.remove(); res(v); };
+      const wrap = h('div', { class: 'dialog-wrap' }, h('div', { class: 'dialog', role: 'alertdialog', 'aria-modal': 'true' },
+        h('h3', null, o.title), o.text ? h('p', null, o.text) : null,
+        h('div', { class: 'dialog-actions' },
+          o.cancel === false ? null : h('button', { class: 'btn', onclick: () => done(false) }, o.cancel || 'Cancelar'),
+          h('button', { class: 'btn ' + (o.danger ? 'danger' : 'primary'), onclick: () => done(true) }, o.ok || 'Confirmar'))));
+      document.body.append(wrap);
+    });
+  }
+  function formDialog(o) {
+    return new Promise((res) => {
+      const inputs = {};
+      const done = (ok) => { const out = {}; for (const [k, el] of Object.entries(inputs)) out[k] = el.value; wrap.remove(); res(ok ? out : null); };
+      const wrap = h('div', { class: 'dialog-wrap' }, h('form', { class: 'dialog', onsubmit: (e) => { e.preventDefault(); done(true); } },
+        h('h3', null, o.title), o.text ? h('p', null, o.text) : null,
+        o.fields.map((f) => { const id = 'fd-' + f.id; inputs[f.id] = h('input', { id, type: f.type || 'text', value: f.value == null ? '' : f.value, inputmode: f.inputmode, placeholder: f.placeholder, autocomplete: 'off' }); return h('div', { class: 'field' }, h('label', { for: id }, f.label), inputs[f.id]); }),
+        h('div', { class: 'dialog-actions' }, h('button', { type: 'button', class: 'btn', onclick: () => done(false) }, 'Cancelar'), h('button', { type: 'submit', class: 'btn primary' }, o.ok || 'Salvar'))));
+      document.body.append(wrap);
+    });
+  }
+  function busy(label) {
+    const lab = h('p', null, label); const bar = h('span');
+    const wrap = h('div', { class: 'dialog-wrap' }, h('div', { class: 'dialog', role: 'status', 'aria-live': 'polite' }, h('h3', null, 'Aguarde'), lab, h('div', { class: 'progress' }, bar)));
+    document.body.append(wrap);
+    return { set(p, txt) { bar.style.width = Math.round(p * 100) + '%'; if (txt) lab.textContent = txt; }, done() { wrap.remove(); } };
+  }
+  const sheets = [];
+  function openSheet(cfg) {
+    const head = h('div', { class: 'sheet-head' }); const body = h('div', { class: 'sheet-body' }); const foot = h('div', { class: 'sheet-foot' });
+    const el = h('section', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': cfg.title }, head, body, foot);
+    let closed = false;
+    const api = {
+      el, body,
+      async close(force) {
+        if (closed) return;
+        if (!force && cfg.beforeClose && !(await cfg.beforeClose())) return;
+        closed = true; el.classList.remove('open'); el.classList.add('closing');
+        setTimeout(() => el.remove(), 200);
+        const i = sheets.indexOf(api); if (i >= 0) sheets.splice(i, 1);
+        document.documentElement.classList.toggle('sheet-open', sheets.length > 0);
+        if (cfg.onClose) cfg.onClose();
+      },
+      update() { const st = body.scrollTop; draw(); body.scrollTop = st; },
+      setTitle(t) { cfg.title = t; drawHead(); },
+    };
+    function drawHead() {
+      head.replaceChildren(
+        h('button', { class: 'icon-btn', 'aria-label': cfg.back ? 'Voltar' : 'Fechar', onclick: () => api.close() }, icon(cfg.back ? 'back' : 'x')),
+        h('h2', null, cfg.title), cfg.headAction ? cfg.headAction(api) : h('span', { class: 'icon-btn-ph' }));
+    }
+    function draw() {
+      const out = cfg.render(api) || {};
+      body.replaceChildren(h('div', { class: 'inner' }, out.body || []));
+      foot.replaceChildren(...(out.foot ? [h('div', { class: 'inner' }, out.foot)] : []));
+      foot.hidden = !out.foot;
+    }
+    drawHead(); draw();
+    $('#sheets').append(el); sheets.push(api); document.documentElement.classList.add('sheet-open');
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
+    return api;
+  }
+  function field(label, control, hint) {
+    const id = control.id || (control.id = 'f' + Math.random().toString(36).slice(2, 8));
+    return h('div', { class: 'field' }, h('label', { for: id }, label), control, hint ? h('div', { class: 'hint' }, hint) : null);
+  }
+  function datalist(id, items) { return h('datalist', { id }, items.map((v) => h('option', { value: v }))); }
+  function tagField(label, list, suggestions, onChange) {
+    const id = 'tg' + Math.random().toString(36).slice(2, 8);
+    const inp = h('input', { id, type: 'text', list: id + 'l', placeholder: 'Digite aqui', autocomplete: 'off', enterkeyhint: 'done' });
+    const tags = h('div', { class: 'tags' });
+    const draw = () => tags.replaceChildren(...list.map((v, i) => h('span', { class: 'tag' }, v,
+      h('button', { type: 'button', 'aria-label': 'Remover ' + v, onclick: () => { list.splice(i, 1); draw(); if (onChange) onChange(); } }, icon('x')))));
+    const add = () => { const v = inp.value.trim(); inp.value = ''; if (v && !list.some((x) => C.norm(x) === C.norm(v))) { list.push(matchName(v, suggestions)); draw(); if (onChange) onChange(); } };
+    inp.addEventListener('change', add);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    draw();
+    return h('div', { class: 'field' }, h('label', { for: id }, label), tags,
+      h('div', { class: 'row' }, inp, h('button', { type: 'button', class: 'btn', onclick: add }, 'Adicionar')), datalist(id + 'l', suggestions));
+  }
+  const matchName = (v, names) => names.find((n) => C.norm(n) === C.norm(v)) || C.capFirst(v);
+  function seg(options, current, onPick) {
+    return h('div', { class: 'seg', role: 'group' }, options.map(([val, lab]) => h('button', { type: 'button', 'aria-pressed': String(val === current), onclick: () => onPick(val) }, lab)));
+  }
+  function dateTag(r) {
+    const u = urgOf(r);
+    return h('div', { class: 'tagdate', 'aria-hidden': 'true' },
+      h('span', { class: 'wd' }, DIA[C.weekday(r.date)]), h('span', { class: 'd' }, ddmm(r.date)),
+      h('span', { class: 'h' }, u ? icon('moon') : null, r.time || (r.date.slice(0, 4) !== today().slice(0, 4) ? r.date.slice(0, 4) : '--:--')));
+  }
+  function statusPill(r) {
+    if (r.status === 'recebido') return h('span', { class: 'pill ok' }, 'Recebido');
+    if (r.status === 'semcobranca') return h('span', { class: 'pill' }, 'Sem cobrança');
+    if (needsReview(r)) return h('span', { class: 'pill warn' }, 'Revisar');
+    if (isLate(r)) return h('span', { class: 'pill danger' }, daysSince(r.date) + ' dias');
+    return h('span', { class: 'pill' }, 'Em aberto');
+  }
+  function recordItem(r, onTap, selectable) {
+    const v = valueOf(r);
+    const sel = selectable && S.sel.has(r.id);
+    const meta = [r.hosp, r.cols && r.cols.join(', '), r.conv].filter(Boolean);
+    return h('button', { class: 'ritem' + (sel ? ' sel' : ''), type: 'button', 'aria-pressed': selectable ? String(!!sel) : null, onclick: () => onTap(r),
+      'aria-label': `${ddmmyyyy(r.date)} ${procText(r)}` },
+      dateTag(r),
+      h('div', { class: 'rmain' }, h('span', { class: 'p' }, procText(r)),
+        h('span', { class: 'm' }, meta.length ? meta.join(' · ') : 'Sem hospital ou colega', r.photoIds && r.photoIds.length ? h('span', null, icon('camera'), ' ', r.photoIds.length) : null)),
+      h('div', { class: 'rside' },
+        h('span', { class: 'val' + (v.kind === 'estimado' ? ' est' : '') }, v.v == null ? '—' : (v.kind === 'estimado' ? '≈ ' : '') + brl(v.v)),
+        statusPill(r)));
+  }
+  function banner(title, text, actionLabel, action, iconName) {
+    return h('div', { class: 'banner', role: 'note' }, icon(iconName || 'info'), h('div', null, h('b', null, title), text, actionLabel ? h('div', null, h('button', { type: 'button', onclick: action }, actionLabel)) : null));
+  }
+  function alertRow(kind, iconName, title, sub, onTap) {
+    return h('button', { class: 'alert ' + kind, type: 'button', onclick: onTap }, icon(iconName), h('span', { class: 't' }, title, sub ? h('span', null, sub) : null), icon('chev', 'sm'));
+  }
+
+  // ================= navegação =================
+  const TITLES = { inicio: 'Registro de Cirurgias', lista: 'Cirurgias', relatorios: 'Relatórios', ajustes: 'Ajustes' };
+  function go(tab, filtro) {
+    S.tab = tab;
+    if (filtro) { S.f = { q: '', status: 'todas', periodo: 'tudo', col: '', hosp: '', conv: '', ...filtro }; }
+    S.selecting = false; S.sel.clear();
+    render(); window.scrollTo(0, 0);
+  }
+  function render() {
+    for (const b of document.querySelectorAll('.tab')) b.setAttribute('aria-current', b.dataset.tab === S.tab ? 'page' : 'false');
+    const sub = S.tab === 'inicio' ? `${DIA[C.weekday(today())]}, ${ddmmyyyy(today())}` : S.tab === 'lista' ? plural(S.records.length, 'registro', 'registros') : '';
+    $('#title').replaceChildren(h('span', { class: 'sub' }, sub || ' '), TITLES[S.tab]);
+    const acts = $('#top-actions'); acts.replaceChildren();
+    if (S.tab === 'lista' && S.records.length) acts.append(h('button', { class: 'btn sm ghost', type: 'button', onclick: () => { S.selecting = !S.selecting; S.sel.clear(); render(); } }, S.selecting ? 'Concluir' : 'Selecionar'));
+    if (S.settings.pinHash) acts.append(h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Bloquear agora', onclick: () => lockScreen() }, icon('lock')));
+    const main = $('#main');
+    const view = { inicio: viewInicio, lista: viewLista, relatorios: viewRelatorios, ajustes: viewAjustes }[S.tab];
+    main.replaceChildren(...[].concat(view()));
+  }
+
+  // ================= Início =================
+  function viewInicio() {
+    const out = [];
+    if (PREVIEW) out.push(banner('Prévia do app', S.demo ? ' Os números abaixo são de exemplo. Importe seus arquivos para ver os seus; nada fica salvo nesta prévia.' : ' Nada do que você importar fica salvo nesta prévia.', 'Como instalar no iPhone', () => sheetInstall(), 'phone'));
+    else if (S.storage === 'memory') out.push(banner('Os dados não estão sendo salvos', ' Este navegador bloqueou o armazenamento. Abra o app pelo ícone na tela de início.', null, null, 'alert'));
+    else if (!isStandalone() && !S.settings.installHidden) out.push(banner('Instale na tela de início', ' No Safari, toque em Compartilhar e depois em Adicionar à Tela de Início. Assim o app abre sem internet e os dados ficam guardados.', 'Ver passo a passo', () => sheetInstall(), 'phone'));
+    if (!S.records.length && !S.loose.length) { out.push(onboarding()); return out; }
+    const m = metrics();
+    const tot = m.buckets.reduce((s, v) => s + v, 0) || 1;
+    out.push(h('section', { class: 'hero', 'aria-label': 'A receber' },
+      h('div', { class: 'label' }, 'A receber'),
+      h('div', { class: 'big' }, h('small', null, 'R$'), nf2.format(m.aReceber)),
+      h('p', { class: 'muted small' }, `${plural(m.open, 'cirurgia em aberto', 'cirurgias em aberto')}`, m.semValor ? ` · ${m.semValor} ainda sem valor de referência` : '', '. Valores estimados pelos repasses anteriores.'),
+      h('div', { class: 'aging', role: 'img', 'aria-label': 'Distribuição por tempo em aberto' }, m.buckets.map((v, i) => (v ? h('span', { class: 'a' + i, style: `width:${(v / tot) * 100}%` }) : null))),
+      h('div', { class: 'aging-legend' }, ['até 30 dias', '31 a 60', '61 a 90', 'mais de 90'].map((l, i) => h('div', null, h('span', null, h('i', { class: 'dot a' + i }), l), h('b', null, brl0(m.buckets[i])))))));
+    const mesNome = MES_LONGO[+today().slice(5, 7) - 1];
+    out.push(h('div', { class: 'stats' },
+      h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Recebido em ' + mesNome), h('span', { class: 'v' }, brl0(m.recMes))),
+      h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Cirurgias em ' + mesNome), h('span', { class: 'v' }, m.cxMes)),
+      h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Recebido em ' + today().slice(0, 4)), h('span', { class: 'v' }, brl0(m.recAno))),
+      h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Em aberto'), h('span', { class: 'v' }, m.open))));
+    const alerts = [];
+    if (m.late) alerts.push(alertRow('danger', 'clock', plural(m.late, 'cirurgia sem pagamento', 'cirurgias sem pagamento') + ` há mais de ${S.settings.alertDias} dias`, 'Confira com o hospital ou com o colega.', () => go('lista', { status: 'atrasadas' })));
+    if (m.review) alerts.push(alertRow('warn', 'alert', plural(m.review, 'cirurgia para revisar', 'cirurgias para revisar'), 'Sem procedimento ou com observação na legenda.', () => go('lista', { status: 'revisar' })));
+    if (m.loose) alerts.push(alertRow('info', 'photo', plural(m.loose, 'foto sem legenda', 'fotos sem legenda'), 'Junte a uma cirurgia, crie uma nova ou descarte.', () => sheetLoose()));
+    if (m.checks) alerts.push(alertRow('warn', 'moon', plural(m.checks, 'pagamento sem acréscimo de urgência', 'pagamentos sem acréscimo de urgência'), 'Feitas à noite, no fim de semana ou em feriado, mas pagas pelo valor normal.', () => { S.relTab = 'convenios'; go('relatorios'); }));
+    if (!PREVIEW && S.records.length && (!S.settings.lastBackup || daysSince(S.settings.lastBackup) > 30)) alerts.push(alertRow('info', 'share', S.settings.lastBackup ? `Último backup em ${ddmmyyyy(S.settings.lastBackup)}` : 'Você ainda não fez backup', 'Os dados ficam só neste iPhone. Guarde uma cópia em Arquivos.', () => exportBackup()));
+    if (alerts.length) out.push(h('section', { class: 'alerts', 'aria-label': 'Pede atenção' }, alerts));
+    out.push(h('div', { class: 'actions' },
+      h('button', { class: 'btn primary', type: 'button', onclick: pickFile }, icon('import'), 'Importar arquivo'),
+      h('button', { class: 'btn', type: 'button', onclick: () => sheetRecord(null) }, icon('plus'), 'Nova cirurgia'),
+      h('button', { class: 'btn', type: 'button', onclick: () => sheetRecebi() }, icon('cash'), 'Pagamento')));
+    const recent = [...S.records].sort(byDateDesc).slice(0, 6);
+    out.push(h('section', { class: 'section' }, h('div', { class: 'section-title' }, 'Mais recentes', h('button', { type: 'button', onclick: () => go('lista', {}) }, 'Ver todas')),
+      h('div', { class: 'rlist' }, recent.map((r) => recordItem(r, (x) => sheetRecord(x))))));
+    return out;
+  }
+  function onboarding() {
+    return h('section', { class: 'card section' },
+      h('h2', { style: 'font-size:20px' }, 'Comece pela conversa do WhatsApp'),
+      h('ol', { class: 'steps' },
+        h('li', null, h('span', null, 'No WhatsApp, abra o grupo das cirurgias, toque no nome do grupo e escolha ', h('b', null, 'Exportar conversa → Anexar mídia → Salvar em Arquivos'), '.')),
+        h('li', null, h('span', null, 'Aqui, toque em ', h('b', null, 'Importar arquivo'), ' e escolha o .zip salvo. Na primeira vez, o app pergunta quem são os colegas que aparecem nas legendas.')),
+        h('li', null, h('span', null, 'Depois importe os repasses (.xlsx). Cada linha dá baixa na cirurgia correspondente.')),
+        h('li', null, h('span', null, 'Faça um backup em Ajustes. Os dados ficam só neste iPhone.'))),
+      h('button', { class: 'btn primary block', type: 'button', onclick: pickFile }, icon('import'), 'Importar arquivo'),
+      h('button', { class: 'btn block', type: 'button', onclick: () => sheetRecord(null) }, icon('plus'), 'Cadastrar uma cirurgia à mão'));
+  }
+  const byDateDesc = (a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')) || (b.num || 0) - (a.num || 0);
+
+  // ================= Lista =================
+  function periodRange(p) {
+    const t = today(); const y = +t.slice(0, 4), mo = +t.slice(5, 7);
+    const first = (yy, mm) => C.ymd(yy, mm, 1);
+    if (p === 'mes') return [first(y, mo), t];
+    if (p === 'mespassado') { const pm = mo === 1 ? 12 : mo - 1, py = mo === 1 ? y - 1 : y; return [first(py, pm), C.fromDayNum(C.dayNum(first(y, mo)) - 1)]; }
+    if (p === '3m') return [C.fromDayNum(C.dayNum(t) - 92), t];
+    if (p === 'ano') return [first(y, 1), C.ymd(y, 12, 31)];
+    if (p === 'anopassado') return [first(y - 1, 1), C.ymd(y - 1, 12, 31)];
+    return null;
+  }
+  function filtered() {
+    const f = S.f; const q = C.norm(f.q); const rng = periodRange(f.periodo);
+    return S.records.filter((r) => {
+      if (f.status === 'aberto' && !isOpen(r)) return false;
+      if (f.status === 'recebido' && r.status !== 'recebido') return false;
+      if (f.status === 'atrasadas' && !isLate(r)) return false;
+      if (f.status === 'revisar' && !needsReview(r)) return false;
+      if (rng && (r.date < rng[0] || r.date > rng[1])) return false;
+      if (f.col && !(r.cols || []).includes(f.col)) return false;
+      if (f.hosp && r.hosp !== f.hosp) return false;
+      if (f.conv && r.conv !== f.conv) return false;
+      if (q) {
+        const hay = C.norm([procText(r), r.hosp, (r.cols || []).join(' '), r.conv, r.notas, r.caption, ddmmyyyy(r.date), r.num ? 'n' + r.num : ''].join(' '));
+        if (!q.split(' ').every((w) => hay.includes(w))) return false;
+      }
+      return true;
+    }).sort(byDateDesc);
+  }
+  function viewLista() {
+    if (!S.records.length) return [onboarding()];
+    const out = [];
+    const search = h('input', { id: 'busca', type: 'search', placeholder: 'Procedimento, hospital, colega…', value: S.f.q, autocomplete: 'off', 'aria-label': 'Buscar' });
+    search.addEventListener('input', () => { S.f.q = search.value; drawList(); });
+    out.push(h('div', { class: 'search' }, icon('search'), search));
+    const counts = { todas: S.records.length, aberto: S.records.filter(isOpen).length, atrasadas: S.records.filter(isLate).length, recebido: S.records.filter((r) => r.status === 'recebido').length, revisar: S.records.filter(needsReview).length };
+    out.push(h('div', { class: 'chips', role: 'group', 'aria-label': 'Situação' }, [['todas', 'Todas'], ['aberto', 'Em aberto'], ['atrasadas', 'Atrasadas'], ['recebido', 'Recebidas'], ['revisar', 'Revisar']]
+      .filter(([k]) => k === 'todas' || counts[k] > 0 || S.f.status === k)
+      .map(([k, l]) => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.f.status === k), onclick: () => { S.f.status = k; render(); } }, l, h('span', { class: 'n' }, counts[k])))));
+    const mkSel = (id, label, cur, opts, onch) => { const s = h('select', { id, 'aria-label': label, onchange: (e) => onch(e.target.value) }, opts.map(([v, l]) => h('option', { value: v, selected: v === cur }, l))); return s; };
+    const used = (k) => uniq(S.records.flatMap((r) => (k === 'cols' ? r.cols || [] : [r[k]]))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    out.push(h('div', { class: 'filters' },
+      mkSel('f-per', 'Período', S.f.periodo, [['tudo', 'Todo período'], ['mes', 'Este mês'], ['mespassado', 'Mês passado'], ['3m', 'Últimos 3 meses'], ['ano', 'Este ano'], ['anopassado', 'Ano passado']], (v) => { S.f.periodo = v; drawList(); }),
+      mkSel('f-col', 'Colega', S.f.col, [['', 'Colegas'], ...used('cols').map((v) => [v, v])], (v) => { S.f.col = v; drawList(); }),
+      mkSel('f-hosp', 'Hospital', S.f.hosp, [['', 'Hospitais'], ...used('hosp').map((v) => [v, v])], (v) => { S.f.hosp = v; drawList(); }),
+      mkSel('f-conv', 'Convênio', S.f.conv, [['', 'Convênios'], ...used('conv').map((v) => [v, v])], (v) => { S.f.conv = v; drawList(); })));
+    const selbar = h('div', { class: 'selbar', hidden: !S.selecting });
+    const listBox = h('div', { class: 'section' });
+    out.push(selbar, listBox);
+    function drawSel() {
+      selbar.hidden = !S.selecting;
+      selbar.replaceChildren(h('span', null, S.sel.size ? plural(S.sel.size, 'selecionada', 'selecionadas') : 'Toque para selecionar'),
+        h('button', { class: 'btn', type: 'button', disabled: !S.sel.size, onclick: () => bulk('recebido') }, 'Recebidas'),
+        h('button', { class: 'btn', type: 'button', disabled: !S.sel.size, onclick: () => bulk('semcobranca') }, 'Sem cobrança'),
+        h('button', { class: 'btn', type: 'button', disabled: !S.sel.size, onclick: () => bulk('excluir'), 'aria-label': 'Excluir selecionadas' }, icon('trash', 'sm')));
+    }
+    function drawList() {
+      const rs = filtered(); const groups = new Map();
+      for (const r of rs) { const k = r.date.slice(0, 7); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+      const tap = (r) => { if (S.selecting) { S.sel.has(r.id) ? S.sel.delete(r.id) : S.sel.add(r.id); drawSel(); drawList(); } else sheetRecord(r); };
+      const kids = [];
+      if (!rs.length) kids.push(h('div', { class: 'empty' }, icon('search'), h('p', null, 'Nenhuma cirurgia com esses filtros.')));
+      for (const [k, arr] of groups) {
+        const rec = arr.filter((r) => r.status === 'recebido').reduce((s, r) => s + ((r.recebido && r.recebido.valor) || 0), 0);
+        kids.push(h('div', { class: 'month-head' }, h('span', null, monthLabel(k)), h('span', { class: 'num' }, `${arr.length} · ${brl0(rec)} recebido`)));
+        kids.push(h('div', { class: 'rlist' }, arr.map((r) => recordItem(r, tap, S.selecting))));
+      }
+      listBox.replaceChildren(...kids);
+    }
+    drawSel(); drawList();
+    return out;
+  }
+  async function bulk(kind) {
+    const ids = [...S.sel]; const n = ids.length; if (!n) return;
+    if (kind === 'excluir') {
+      if (!(await confirmDialog({ title: `Excluir ${plural(n, 'cirurgia', 'cirurgias')}?`, text: 'As fotos dessas cirurgias também serão apagadas deste app. As do WhatsApp continuam lá.', ok: 'Excluir', danger: true }))) return;
+      for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r) await deleteRecord(r); }
+    } else if (kind === 'recebido') {
+      if (!(await confirmDialog({ title: `Marcar ${plural(n, 'cirurgia', 'cirurgias')} como recebidas?`, text: 'Use para cirurgias já pagas antes de você começar a usar o app. O valor fica em branco; dá para preencher depois em cada uma.', ok: 'Marcar' }))) return;
+      for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r && r.status !== 'recebido') { r.status = 'recebido'; r.recebido = { valor: null, data: today(), origem: 'manual' }; await saveRecord(r); } }
+    } else if (kind === 'semcobranca') {
+      for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r) { r.status = 'semcobranca'; r.recebido = null; await saveRecord(r); } }
+    }
+    S.selecting = false; S.sel.clear(); derive(); render(); toast('Pronto.');
+  }
+
+  // ================= Relatórios =================
+  function viewRelatorios() {
+    if (!S.records.length) return [onboarding()];
+    const out = [seg([['mes', 'Por mês'], ['aberto', 'Em aberto'], ['pessoas', 'Colegas'], ['convenios', 'Convênios']], S.relTab, (v) => { S.relTab = v; render(); })];
+    out.push(...({ mes: repMes, aberto: repAberto, pessoas: repPessoas, convenios: repConvenios }[S.relTab])());
+    return out;
+  }
+  function table(head, rows, totRow) {
+    return h('div', { class: 'table-wrap' }, h('table', { class: 'rep' },
+      h('thead', null, h('tr', null, head.map((c) => h('th', { scope: 'col' }, c)))),
+      h('tbody', null, rows.map((r) => h('tr', null, r.map((c) => h('td', null, c)))), totRow ? h('tr', { class: 'tot' }, totRow.map((c) => h('td', null, c))) : null)));
+  }
+  function repMes() {
+    const by = new Map();
+    for (const r of S.records) {
+      const k = r.date.slice(0, 7); if (!by.has(k)) by.set(k, { n: 0, rec: 0, est: 0, sem: 0 });
+      const o = by.get(k); o.n++; const v = valueOf(r);
+      if (v.kind === 'recebido') o.rec += v.v || 0; else if (isOpen(r)) { if (v.v != null) o.est += v.v; else o.sem++; }
+    }
+    const keys = [...by.keys()].sort().reverse();
+    const max = Math.max(1, ...keys.map((k) => by.get(k).rec + by.get(k).est));
+    const bars = h('div', { class: 'card section' }, h('div', { class: 'section-title' }, 'Valor por mês da cirurgia'),
+      h('div', { class: 'legend' }, h('span', null, h('i', { class: 'rec' }), 'Recebido'), h('span', null, h('i', { class: 'est' }), 'A receber (estimado)')),
+      h('div', { class: 'bars' }, keys.slice(0, 12).map((k) => { const o = by.get(k); return h('div', { class: 'bar-row' }, h('span', { class: 'lab' }, monthShort(k)),
+        h('div', { class: 'bar-track', role: 'img', 'aria-label': `${monthLabel(k)}: recebido ${brl(o.rec)}, a receber ${brl(o.est)}` }, h('span', { class: 'rec', style: `width:${(o.rec / max) * 100}%` }), h('span', { class: 'est', style: `width:${(o.est / max) * 100}%` })),
+        h('span', { class: 'v' }, brl0(o.rec + o.est))); })));
+    const tot = keys.reduce((a, k) => { const o = by.get(k); a.n += o.n; a.rec += o.rec; a.est += o.est; return a; }, { n: 0, rec: 0, est: 0 });
+    const t1 = table(['Mês', 'Qtd.', 'Recebido', 'A receber'], keys.map((k) => { const o = by.get(k); return [monthShort(k), o.n, brl0(o.rec), o.est ? '≈ ' + brl0(o.est) : '—']; }), ['Total', tot.n, brl0(tot.rec), '≈ ' + brl0(tot.est)]);
+    const pays = new Map();
+    for (const r of S.records) if (r.status === 'recebido' && r.recebido && r.recebido.data) { const k = r.recebido.data.slice(0, 7); pays.set(k, (pays.get(k) || 0) + (r.recebido.valor || 0)); }
+    const pk = [...pays.keys()].sort().reverse();
+    const out = [bars, h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Produção por mês da cirurgia'), t1)];
+    if (pk.length) out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Pagamentos por mês em que entraram'), table(['Mês', 'Recebido'], pk.map((k) => [monthLabel(k), brl(pays.get(k))]))));
+    out.push(h('p', { class: 'muted small' }, '"A receber" usa o valor que você informou ou uma estimativa pelos repasses anteriores do mesmo procedimento, com 30% a mais das 19h às 7h, no fim de semana e em feriado. Cirurgias sem referência de valor ficam de fora da soma.'));
+    return out;
+  }
+  function repAberto() {
+    const open = S.records.filter(isOpen);
+    const lim = [[0, 30, 'Até 30 dias'], [31, 60, '31 a 60 dias'], [61, 90, '61 a 90 dias'], [91, 1e9, 'Mais de 90 dias']];
+    const rows = lim.map(([a, b, l]) => { const rs = open.filter((r) => { const d = daysSince(r.date); return d >= a && d <= b; }); const v = rs.reduce((s, r) => s + (valueOf(r).v || 0), 0); return [l, rs.length, '≈ ' + brl0(v)]; });
+    const total = open.reduce((s, r) => s + (valueOf(r).v || 0), 0);
+    const oldest = [...open].sort((a, b) => a.date.localeCompare(b.date)).slice(0, 12);
+    return [h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Há quanto tempo estão em aberto'), table(['Tempo', 'Qtd.', 'Valor'], rows, ['Total', open.length, '≈ ' + brl0(total)])),
+      h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'As mais antigas', h('button', { type: 'button', onclick: () => go('lista', { status: 'aberto' }) }, 'Ver todas')),
+        oldest.length ? h('div', { class: 'rlist' }, oldest.map((r) => recordItem(r, (x) => sheetRecord(x)))) : h('div', { class: 'empty' }, h('p', null, 'Nada em aberto.')))];
+  }
+  function groupTable(keyFn, label) {
+    const by = new Map();
+    for (const r of S.records) for (const k of [].concat(keyFn(r) || '(não informado)')) {
+      if (!by.has(k)) by.set(k, { n: 0, rec: 0, est: 0 }); const o = by.get(k); o.n++; const v = valueOf(r);
+      if (v.kind === 'recebido') o.rec += v.v || 0; else if (isOpen(r) && v.v != null) o.est += v.v;
+    }
+    const keys = [...by.keys()].sort((a, b) => by.get(b).n - by.get(a).n);
+    return table([label, 'Qtd.', 'Recebido', 'A receber'], keys.map((k) => { const o = by.get(k); return [k, o.n, brl0(o.rec), o.est ? '≈ ' + brl0(o.est) : '—']; }));
+  }
+  function repPessoas() {
+    return [h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Por colega'), groupTable((r) => (r.cols && r.cols.length ? r.cols : null), 'Colega')),
+      h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Por hospital'), groupTable((r) => r.hosp, 'Hospital'))];
+  }
+  function repConvenios() {
+    const by = new Map();
+    for (const r of S.records) for (const l of r.rep || []) { const k = l.conv || '(sem convênio)'; if (!by.has(k)) by.set(k, { n: 0, v: 0 }); const o = by.get(k); o.n++; o.v += l.valor; }
+    const keys = [...by.keys()].sort((a, b) => by.get(b).v - by.get(a).v);
+    const out = [];
+    out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Recebido por convênio'),
+      keys.length ? table(['Convênio', 'Linhas', 'Total'], keys.map((k) => { const o = by.get(k); return [h('span', null, k, h('small', null, 'média ' + brl0(o.v / o.n))), o.n, brl0(o.v)]; })) : h('p', { class: 'muted small' }, 'Aparece depois que você importar um repasse.')));
+    if (S.checks.length) {
+      out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Conferir acréscimo de urgência'),
+        h('p', { class: 'muted small' }, 'Cirurgias feitas das 19h às 7h, no fim de semana ou em feriado, pagas pelo mesmo valor do horário normal para o mesmo procedimento e convênio.'),
+        h('div', { class: 'rlist' }, S.checks.map((c) => { const r = S.records.find((x) => x.id === c.recId); return r ? recordItem(r, (x) => sheetRecord(x)) : null; }))));
+    }
+    const refs = [...S.refs.byProc.entries()].sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'));
+    out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Valores de referência aprendidos'),
+      refs.length ? h('div', { class: 'refs' }, refs.map(([p, arr]) => h('div', null, h('b', null, p), h('span', null, `normal ${brl(C.median(arr))} · urgência ${brl(C.median(arr) * 1.3)} · ${plural(arr.length, 'linha', 'linhas')}`)))) : h('p', { class: 'muted small' }, 'Os valores vêm dos repasses importados. Sem repasse, as estimativas ficam em branco.'),
+      h('p', { class: 'muted small' }, 'Mediana do que você recebeu em cada procedimento, juntando todos os convênios. É o valor usado nas estimativas.')));
+    return out;
+  }
+
+  // ================= Ajustes =================
+  function viewAjustes() {
+    const li = (iconName, title, sub, onTap, cls) => h('button', { class: 'li' + (cls ? ' ' + cls : ''), type: 'button', onclick: onTap }, icon(iconName), h('span', { class: 't' }, title, sub ? h('span', null, sub) : null), icon('chev', 'chev'));
+    const out = [];
+    if (PREVIEW || !isStandalone()) out.push(h('div', { class: 'list-card' }, li('phone', 'Instalar no iPhone', PREVIEW ? 'Para usar no dia a dia, com os dados guardados' : 'Adicionar à Tela de Início', () => sheetInstall())));
+    out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Dados'), h('div', { class: 'list-card' },
+      li('share', 'Fazer backup agora', S.settings.lastBackup ? 'Último em ' + ddmmyyyy(S.settings.lastBackup) : 'Nenhum backup ainda', () => exportBackup()),
+      li('undo', 'Restaurar backup', 'Substitui os dados deste aparelho', () => pickFile()),
+      li('file', 'Exportar planilha', 'Arquivo .csv que abre no Excel ou no Numbers', () => exportCSV()),
+      li('import', 'Importar arquivo', 'Conversa do WhatsApp, repasse ou backup', () => pickFile()))));
+    out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Cadastros'), h('div', { class: 'list-card' },
+      li('tag', 'Termos e apelidos', `${plural(S.terms.filter((t) => t.type !== 'ign').length, 'termo', 'termos')}: procedimentos, hospitais, colegas e convênios`, () => sheetTerms()),
+      li('file', 'Repasses importados', plural(S.repasses.length, 'repasse', 'repasses'), () => sheetRepasses()),
+      li('photo', 'Fotos sem legenda', plural(S.loose.length, 'foto', 'fotos'), () => sheetLoose()))));
+    out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Preferências'), h('div', { class: 'list-card' },
+      li('clock', 'Aviso de atraso', `Depois de ${S.settings.alertDias} dias sem pagamento`, async () => {
+        const v = await formDialog({ title: 'Aviso de atraso', text: 'Depois de quantos dias sem pagamento uma cirurgia aparece como atrasada?', fields: [{ id: 'd', label: 'Dias', type: 'number', inputmode: 'numeric', value: S.settings.alertDias }] });
+        if (v && +v.d > 0) { S.settings.alertDias = Math.round(+v.d); await saveSettings(); render(); }
+      }),
+      li('moon', 'Feriados locais', S.settings.feriados ? S.settings.feriados : 'Nenhum', async () => {
+        const v = await formDialog({ title: 'Feriados locais', text: 'Além dos feriados nacionais, que dias contam como feriado para o acréscimo de urgência? Use dia/mês, separados por vírgula.', fields: [{ id: 'f', label: 'Datas', value: S.settings.feriados, placeholder: '31/08, 20/11' }] });
+        if (v) { S.settings.feriados = v.f.trim(); await saveSettings(); derive(); render(); }
+      }),
+      li('lock', 'PIN para abrir o app', S.settings.pinHash ? 'Ativado' : 'Desativado', () => sheetPin()))));
+    out.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Sobre'), h('div', { class: 'list-card' },
+      h('div', { class: 'li', role: 'note' }, icon('info'), h('span', { class: 't' }, `Versão ${VERSION}`, h('span', { id: 'storage-info' }, S.storage === 'memory' ? 'Sem armazenamento: nada fica salvo' : 'Dados guardados só neste aparelho'))),
+      li('trash', 'Apagar todos os dados', 'Cirurgias, fotos, termos e repasses deste app', () => wipeAll(), 'danger'))));
+    if (navigator.storage && navigator.storage.estimate && S.storage !== 'memory') navigator.storage.estimate().then((e) => { const el = $('#storage-info'); if (el && e.usage) el.textContent = `Dados guardados só neste aparelho · ${(e.usage / 1048576).toFixed(1).replace('.', ',')} MB em uso`; }).catch(() => {});
+    return out;
+  }
+  async function wipeAll() {
+    if (!(await confirmDialog({ title: 'Apagar todos os dados?', text: 'Isso remove cirurgias, fotos, termos e repasses deste app. Faça um backup antes se quiser guardar uma cópia.', ok: 'Continuar', danger: true }))) return;
+    if (!(await confirmDialog({ title: 'Tem certeza?', text: 'Não dá para desfazer.', ok: 'Apagar tudo', danger: true }))) return;
+    for (const s of STORES) await Store.clear(s);
+    urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear();
+    S.demo = false; await load(); go('inicio'); toast('Dados apagados.');
+  }
+
+  // ================= ficha da cirurgia =================
+  function newRecord(over) {
+    return { id: C.uid('r'), num: 0, key: null, origem: 'manual', grupo: '', date: today(), time: null, procs: [], hosp: null, cols: [], conv: null, funcao: null, valorPrevisto: null, status: 'aberto', recebido: null, rep: [], caption: '', notas: '', photoIds: [], photoNames: [], revisar: [], createdAt: Date.now(), updatedAt: Date.now(), ...(over || {}) };
+  }
+  function sheetRecord(rec, opts) {
+    opts = opts || {};
+    const isNew = !rec || !S.records.some((x) => x.id === rec.id);
+    const d = JSON.parse(JSON.stringify(rec || newRecord()));
+    const added = [], removed = [];
+    let dirty = !!opts.dirty, saved = false;
+    const mark = () => { dirty = true; };
+    const api = openSheet({
+      title: isNew ? 'Nova cirurgia' : d.num ? `Cirurgia nº ${d.num}` : 'Cirurgia', back: !isNew,
+      beforeClose: async () => {
+        if (saved || !dirty) { if (!saved && added.length) await deletePhotos(added); return true; }
+        const ok = await confirmDialog({ title: 'Descartar alterações?', text: 'O que você mudou nesta ficha não será salvo.', ok: 'Descartar', danger: true, cancel: 'Continuar editando' });
+        if (ok && added.length) await deletePhotos(added);
+        return ok;
+      },
+      render(api) {
+        const kids = [];
+        // fotos
+        const addPhoto = h('button', { class: 'thumb add', type: 'button', 'aria-label': 'Adicionar foto', onclick: () => pickPhotos(async (files) => {
+          const b = busy('Guardando fotos…');
+          try { let i = 0; for (const f of files) { const id = await storePhoto(f, f.name); d.photoIds.push(id); added.push(id); b.set(++i / files.length); } } finally { b.done(); }
+          mark(); api.update();
+        }) }, icon('plus'));
+        kids.push(h('div', { class: 'photos', 'aria-label': 'Fotos' }, d.photoIds.map((id, i) => h('button', { class: 'thumb', type: 'button', 'aria-label': `Ver foto ${i + 1}`, onclick: () => openViewer(d.photoIds, i, async (rid) => { d.photoIds = d.photoIds.filter((x) => x !== rid); removed.push(rid); mark(); api.update(); }) }, photoImg(id, true))), addPhoto));
+        if (!isNew) kids.push(statusCard(d, api, mark));
+        if (needsReview(d)) kids.push(h('div', { class: 'flags' }, d.revisar.map((f) => h('div', { class: 'alert warn' }, icon('alert'), h('span', { class: 't' }, f))),
+          h('button', { class: 'btn sm', type: 'button', onclick: () => { d.revisar = []; mark(); api.update(); } }, icon('check', 'sm'), 'Marcar como conferida')));
+        // formulário
+        const dateIn = h('input', { type: 'date', value: d.date, required: true, oninput: (e) => { d.date = e.target.value; mark(); urgEl.replaceChildren(urgText()); } });
+        const timeIn = h('input', { type: 'time', value: d.time || '', oninput: (e) => { d.time = e.target.value || null; mark(); urgEl.replaceChildren(urgText()); } });
+        const urgText = () => { const u = d.date ? C.isUrgent(d.date, d.time, S.hol) : null; return u ? h('span', { class: 'pill night wrap' }, icon('moon', 'sm'), 'Horário de urgência: +30% (das 19h às 7h, fim de semana ou feriado)') : h('span', { class: 'muted small' }, u === false ? 'Horário normal' : 'Sem hora: a urgência só conta em fim de semana e feriado'); };
+        const urgEl = h('div', null, urgText());
+        const hospIn = h('input', { type: 'text', list: 'dl-hosp', value: d.hosp || '', autocomplete: 'off', oninput: (e) => { d.hosp = e.target.value; mark(); } });
+        const convIn = h('input', { type: 'text', list: 'dl-conv', value: d.conv || '', autocomplete: 'off', placeholder: 'Ex.: Unimed', oninput: (e) => { d.conv = e.target.value; mark(); } });
+        const funcs = uniq(['Cirurgiã principal', 'Primeiro auxiliar', 'Segundo auxiliar', d.funcao]);
+        const funcSel = h('select', { onchange: (e) => { d.funcao = e.target.value || null; mark(); } }, h('option', { value: '' }, 'Não informada'), funcs.map((f) => h('option', { value: f, selected: C.norm(f) === C.norm(d.funcao || '') }, f)));
+        const est = isOpen(d) ? C.estimate(d, S.refs, S.index, S.hol) : null;
+        const valIn = h('input', { type: 'text', inputmode: 'decimal', value: moneyInput(d.valorPrevisto), placeholder: est && est.valor != null ? '≈ ' + nf2.format(est.valor) + ' (estimado)' : 'Opcional', oninput: (e) => { d.valorPrevisto = parseMoney(e.target.value); mark(); } });
+        const notas = h('textarea', { rows: 3, placeholder: 'Sem dados do paciente', oninput: (e) => { d.notas = e.target.value; mark(); } }); notas.value = d.notas || '';
+        kids.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() },
+          h('div', { class: 'grid2' }, field('Data', dateIn), field('Hora', timeIn)), urgEl,
+          tagField('Procedimentos', d.procs, namesOf('proc'), mark),
+          field('Hospital', hospIn), datalist('dl-hosp', namesOf('hosp')),
+          tagField('Colegas', d.cols, namesOf('col'), mark),
+          h('div', { class: 'grid2' }, field('Sua função', funcSel), field('Convênio', convIn)), datalist('dl-conv', namesOf('conv')),
+          isOpen(d) ? field('Valor previsto (R$)', valIn, est && est.valor != null ? `Sem valor informado, conta ≈ ${brl(est.valor)}${est.parcial ? ' (parcial: algum procedimento ainda sem referência)' : ''}.` : 'Sem valor informado e sem referência de repasses para este procedimento.') : null,
+          field('Observações', notas)));
+        if (d.rep && d.rep.length) kids.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Linhas do repasse'),
+          h('div', { class: 'card' }, h('dl', { class: 'kv' }, d.rep.flatMap((l) => [h('dt', null, `${l.procName}${l.conv ? ' · ' + l.conv : ''}${l.funcao ? ' · ' + l.funcao : ''}`), h('dd', null, brl(l.valor))])))));
+        if (d.caption) kids.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Legenda original no WhatsApp'), h('div', { class: 'caption-box' }, d.caption)));
+        if (!isNew) kids.push(h('div', { class: 'list-card' },
+          h('button', { class: 'li', type: 'button', onclick: () => mergeInto(d, api) }, icon('merge'), h('span', { class: 't' }, 'Juntar com outra cirurgia', h('span', null, 'Quando a mesma cirurgia foi registrada duas vezes')), icon('chev', 'chev')),
+          h('button', { class: 'li danger', type: 'button', onclick: async () => {
+            if (!(await confirmDialog({ title: 'Excluir esta cirurgia?', text: 'As fotos dela também saem deste app. No WhatsApp, nada muda.', ok: 'Excluir', danger: true }))) return;
+            await deleteRecord(S.records.find((x) => x.id === d.id) || d); saved = true; derive(); render(); api.close(true); toast('Cirurgia excluída.');
+          } }, icon('trash'), h('span', { class: 't' }, 'Excluir cirurgia'), icon('chev', 'chev'))));
+        const foot = h('button', { class: 'btn primary', type: 'button', onclick: save }, isNew ? 'Salvar cirurgia' : 'Salvar alterações');
+        return { body: kids, foot };
+      },
+    });
+    async function save() {
+      if (!d.date) { toast('Informe a data da cirurgia.'); return; }
+      d.hosp = (d.hosp || '').trim() ? matchName(d.hosp.trim(), namesOf('hosp')) : null;
+      d.conv = (d.conv || '').trim() ? matchName(d.conv.trim(), namesOf('conv')) : null;
+      if (d.procs.length) d.revisar = (d.revisar || []).filter((f) => f !== 'Sem procedimento');
+      await learnTerms(d);
+      if (isNew) { S.settings.seq += 1; d.num = S.settings.seq; await saveSettings(); }
+      await saveRecord(d);
+      if (removed.length) await deletePhotos(removed);
+      saved = true; derive(); render();
+      if (opts.onSaved) await opts.onSaved(d);
+      api.close(true); toast(isNew ? 'Cirurgia salva.' : 'Alterações salvas.');
+    }
+    return api;
+  }
+  async function learnTerms(r) {
+    const add = [];
+    const has = (type, name) => S.terms.some((t) => t.type === type && C.norm(t.name) === C.norm(name)) || add.some((t) => t.type === type && C.norm(t.name) === C.norm(name));
+    for (const p of r.procs || []) if (!has('proc', p)) add.push({ id: C.uid('t'), type: 'proc', name: p, fam: C.norm(p).split(' ')[0], aliases: [C.norm(p)] });
+    for (const c of r.cols || []) if (!has('col', c)) add.push({ id: C.uid('t'), type: 'col', name: c, aliases: [C.norm(c)] });
+    if (r.hosp && !has('hosp', r.hosp)) add.push({ id: C.uid('t'), type: 'hosp', name: r.hosp, aliases: [C.norm(r.hosp)] });
+    if (r.conv && !has('conv', r.conv)) add.push({ id: C.uid('t'), type: 'conv', name: r.conv, aliases: [C.norm(r.conv)] });
+    if (add.length) { S.terms.push(...add); await Store.putMany('terms', add); }
+  }
+  function statusCard(d, api, mark) {
+    const v = valueOf(d);
+    if (d.status === 'recebido') {
+      const rp = d.recebido || {};
+      const origem = rp.origem === 'repasse' ? `Repasse${(S.repasses.find((x) => x.id === rp.repId) || {}).numero ? ' nº ' + S.repasses.find((x) => x.id === rp.repId).numero : ''}` : 'Registrado à mão';
+      return h('div', { class: 'card section' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('span', { class: 'pill ok' }, icon('check', 'sm'), 'Recebido'), h('span', { class: 'mono', style: 'font-size:20px;font-weight:600' }, rp.valor == null ? 'Valor não informado' : brl(rp.valor))),
+        h('p', { class: 'muted small' }, `${origem}${rp.data ? ' · pago em ' + ddmmyyyy(rp.data) : ''}`),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn sm', type: 'button', onclick: async () => { const out = await payDialog(d, rp.valor, rp.data); if (out) { d.recebido = { ...rp, valor: out.valor, data: out.data }; mark(); api.update(); } } }, 'Editar valor'),
+          h('button', { class: 'btn sm ghost', type: 'button', onclick: () => { d.status = 'aberto'; d.recebido = null; mark(); api.update(); } }, 'Desfazer recebimento')));
+    }
+    if (d.status === 'semcobranca') return h('div', { class: 'card row', style: 'justify-content:space-between' }, h('span', { class: 'pill' }, 'Sem cobrança'), h('button', { class: 'btn sm', type: 'button', onclick: () => { d.status = 'aberto'; mark(); api.update(); } }, 'Reabrir'));
+    const dias = daysSince(d.date);
+    return h('div', { class: 'card section' },
+      h('div', { class: 'row', style: 'justify-content:space-between' }, h('span', { class: 'pill' + (isLate(d) ? ' danger' : '') }, dias >= 0 ? `Em aberto há ${plural(dias, 'dia', 'dias')}` : 'Agendada'),
+        h('span', { class: 'mono', style: 'font-size:20px;font-weight:600' }, v.v == null ? '—' : (v.kind === 'estimado' ? '≈ ' : '') + brl(v.v))),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn sm primary', type: 'button', onclick: async () => { const out = await payDialog(d, d.valorPrevisto != null ? d.valorPrevisto : null, today()); if (out) { d.status = 'recebido'; d.recebido = { valor: out.valor, data: out.data, origem: 'manual' }; mark(); api.update(); } } }, icon('cash', 'sm'), 'Recebi'),
+        h('button', { class: 'btn sm', type: 'button', onclick: () => { d.status = 'semcobranca'; mark(); api.update(); } }, 'Sem cobrança')));
+  }
+  async function payDialog(d, valor, data) {
+    const out = await formDialog({ title: 'Pagamento', text: procText(d), ok: 'Confirmar', fields: [{ id: 'v', label: 'Valor recebido (R$)', inputmode: 'decimal', value: moneyInput(valor), placeholder: '0,00' }, { id: 'd', label: 'Data do pagamento', type: 'date', value: data || today() }] });
+    if (!out) return null;
+    return { valor: parseMoney(out.v), data: out.d || today() };
+  }
+  async function deleteRecord(r) {
+    await deletePhotos(r.photoIds);
+    if (r.key) { S.ignored.add(r.key); await Store.put('ignored', { key: r.key }); }
+    S.records = S.records.filter((x) => x.id !== r.id); await Store.del('records', r.id);
+  }
+  function mergeInto(d, parentApi) {
+    sheetPick('Juntar com…', S.records.filter((r) => r.id !== d.id), async (target) => {
+      const ok = await confirmDialog({ title: 'Juntar as duas fichas?', text: `As fotos e a legenda desta ficha vão para a cirurgia de ${ddmmyyyy(target.date)} (${procText(target)}). Esta ficha deixa de existir.`, ok: 'Juntar' });
+      if (!ok) return false;
+      const t = S.records.find((x) => x.id === target.id);
+      t.photoIds.push(...d.photoIds);
+      if (!t.procs.length) t.procs = d.procs.slice();
+      if (!t.hosp) t.hosp = d.hosp; if (!t.cols.length) t.cols = d.cols.slice(); if (!t.time) t.time = d.time; if (!t.conv) t.conv = d.conv;
+      if (d.caption) t.caption = t.caption ? t.caption + '\n' + d.caption : d.caption;
+      if (d.notas) t.notas = t.notas ? t.notas + '\n' + d.notas : d.notas;
+      if (t.status !== 'recebido' && d.status === 'recebido') { t.status = 'recebido'; t.recebido = d.recebido; t.rep = d.rep; }
+      await saveRecord(t);
+      if (d.key) { S.ignored.add(d.key); await Store.put('ignored', { key: d.key }); }
+      S.records = S.records.filter((x) => x.id !== d.id); await Store.del('records', d.id);
+      derive(); render(); parentApi.close(true); toast('Fichas juntadas.');
+      return true;
+    });
+  }
+  function sheetPick(title, records, onPick) {
+    let q = '';
+    const api = openSheet({ title, back: true, render(api) {
+      const inp = h('input', { type: 'search', placeholder: 'Buscar por data, procedimento, colega…', value: q, 'aria-label': 'Buscar', autocomplete: 'off' });
+      const box = h('div', { class: 'rlist' });
+      const draw = () => {
+        const nq = C.norm(q);
+        const rs = records.filter((r) => !nq || nq.split(' ').every((w) => C.norm([procText(r), r.hosp, (r.cols || []).join(' '), ddmmyyyy(r.date)].join(' ')).includes(w))).sort(byDateDesc).slice(0, 80);
+        box.replaceChildren(...(rs.length ? rs.map((r) => recordItem(r, async (x) => { const done = await onPick(x); if (done !== false) api.close(true); })) : [h('div', { class: 'empty' }, h('p', null, 'Nada encontrado.'))]));
+      };
+      inp.addEventListener('input', () => { q = inp.value; draw(); }); draw();
+      return { body: [h('div', { class: 'search' }, icon('search'), inp), box] };
+    } });
+    return api;
+  }
+
+  // ================= visualizador de fotos =================
+  function openViewer(ids, start, onRemove) {
+    let i = start || 0;
+    const img = h('img', { alt: '' });
+    const box = h('div', { class: 'viewer-img', onclick: () => box.classList.toggle('zoom') }, img);
+    const count = h('span', { class: 'mono' });
+    const load = async () => { box.classList.remove('zoom'); img.removeAttribute('src'); count.textContent = `${i + 1} de ${ids.length}`; const u = await photoURL(ids[i], false); if (u) img.src = u; };
+    const close = () => { wrap.remove(); document.removeEventListener('keydown', key); };
+    const key = (e) => { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight' && i < ids.length - 1) { i++; load(); } if (e.key === 'ArrowLeft' && i > 0) { i--; load(); } };
+    const wrap = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Foto' },
+      h('div', { class: 'viewer-top' }, h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Fechar', onclick: close }, icon('x')), count,
+        onRemove ? h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Tirar foto desta cirurgia', onclick: async () => {
+          if (!(await confirmDialog({ title: 'Tirar esta foto da cirurgia?', text: 'Ela sai deste app quando você salvar a ficha. No WhatsApp continua.', ok: 'Tirar', danger: true }))) return;
+          const id = ids[i]; close(); onRemove(id);
+        } }, icon('trash')) : h('span', { class: 'icon-btn-ph' })),
+      box,
+      h('div', { class: 'viewer-nav' }, h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Foto anterior', onclick: () => { if (i > 0) { i--; load(); } } }, icon('back')),
+        h('span', { class: 'small', style: 'opacity:.7;align-self:center' }, 'Toque na foto para ampliar'),
+        h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Próxima foto', onclick: () => { if (i < ids.length - 1) { i++; load(); } } }, icon('chev'))));
+    document.body.append(wrap); document.addEventListener('keydown', key); load();
+  }
+
+  // ================= pagamento manual =================
+  function sheetRecebi() {
+    const st = { valor: null, data: today(), fonte: '', sel: [], alloc: new Map() };
+    const fontes = uniq([...namesOf('col'), ...namesOf('conv'), ...namesOf('hosp')]);
+    const api = openSheet({ title: 'Registrar pagamento', render(api) {
+      const valIn = h('input', { type: 'text', inputmode: 'decimal', placeholder: '0,00', value: moneyInput(st.valor), oninput: (e) => { st.valor = parseMoney(e.target.value); realloc(); drawCands(); drawFoot(); } });
+      const dateIn = h('input', { type: 'date', value: st.data, oninput: (e) => { st.data = e.target.value; } });
+      const fonteSel = h('select', { onchange: (e) => { st.fonte = e.target.value; drawCands(); } }, h('option', { value: '' }, 'Qualquer um'), fontes.map((f) => h('option', { value: f, selected: f === st.fonte }, f)));
+      const cands = h('div', { class: 'section' });
+      const footBtn = h('button', { class: 'btn primary', type: 'button', onclick: confirm }, 'Registrar');
+      function realloc() {
+        const sel = st.sel.map((id) => S.records.find((r) => r.id === id)).filter(Boolean);
+        st.alloc.clear(); if (!sel.length || st.valor == null) return;
+        const w = sel.map((r) => valueOf(r).v || 0); const tw = w.reduce((s, x) => s + x, 0);
+        let rest = st.valor;
+        sel.forEach((r, i) => { const v = i === sel.length - 1 ? C.round2(rest) : C.round2(tw ? (st.valor * w[i]) / tw : st.valor / sel.length); st.alloc.set(r.id, v); rest -= v; });
+      }
+      function drawCands() {
+        const f = C.norm(st.fonte);
+        const open = S.records.filter(isOpen);
+        const match = (r) => !f || (r.cols || []).some((c) => C.norm(c) === f) || C.norm(r.conv || '') === f || C.norm(r.hosp || '') === f;
+        const list = open.filter(match).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 60);
+        const items = list.map((r) => {
+          const on = st.sel.includes(r.id);
+          const row = recordItem(r, () => { st.sel = on ? st.sel.filter((x) => x !== r.id) : [...st.sel, r.id]; realloc(); drawCands(); drawFoot(); }, false);
+          row.setAttribute('aria-pressed', String(on)); if (on) row.classList.add('sel');
+          return h('div', null, row, on && st.sel.length > 1 ? h('div', { class: 'row', style: 'padding:0 12px 12px 86px' }, h('span', { class: 'small muted' }, 'Valor desta:'),
+            h('input', { type: 'text', inputmode: 'decimal', 'aria-label': 'Valor desta cirurgia', value: moneyInput(st.alloc.get(r.id)), style: 'max-width:140px', oninput: (e) => { st.alloc.set(r.id, parseMoney(e.target.value)); drawFoot(); } })) : null);
+        });
+        cands.replaceChildren(h('div', { class: 'section-title' }, 'A que cirurgias se refere?', h('span', null, st.sel.length ? plural(st.sel.length, 'selecionada', 'selecionadas') : '')),
+          items.length ? h('div', { class: 'rlist' }, items) : h('div', { class: 'empty' }, h('p', null, f ? 'Nenhuma cirurgia em aberto com esse nome.' : 'Nenhuma cirurgia em aberto.')));
+      }
+      function drawFoot() {
+        const soma = [...st.alloc.values()].reduce((s, v) => s + (v || 0), 0);
+        footBtn.disabled = !(st.valor > 0 && st.sel.length);
+        footBtn.textContent = st.sel.length > 1 && Math.abs(soma - (st.valor || 0)) > 0.009 ? `A soma dá ${brl(soma)}` : `Registrar ${st.valor ? brl(st.valor) : ''}`;
+      }
+      async function confirm() {
+        const soma = [...st.alloc.values()].reduce((s, v) => s + (v || 0), 0);
+        if (st.sel.length > 1 && Math.abs(soma - st.valor) > 0.009) { toast(`A soma das cirurgias (${brl(soma)}) é diferente do valor recebido (${brl(st.valor)}).`); return; }
+        for (const id of st.sel) { const r = S.records.find((x) => x.id === id); if (!r) continue; r.status = 'recebido'; r.recebido = { valor: st.sel.length === 1 ? st.valor : st.alloc.get(id), data: st.data || today(), origem: 'manual', fonte: st.fonte || null }; await saveRecord(r); }
+        derive(); render(); api.close(true); toast('Pagamento registrado.');
+      }
+      drawCands(); drawFoot();
+      return { body: [h('div', { class: 'grid2' }, field('Valor recebido (R$)', valIn), field('Data', dateIn)), field('Quem pagou', fonteSel, 'Filtra as cirurgias em aberto por colega, convênio ou hospital.'), cands], foot: footBtn };
+    } });
+    return api;
+  }
+
+  // ================= fotos sem legenda =================
+  function sheetLoose() {
+    const sel = new Set();
+    const api = openSheet({ title: 'Fotos sem legenda', render(api) {
+      if (!S.loose.length) return { body: [h('div', { class: 'empty' }, icon('photo'), h('p', null, 'Nenhuma foto sem legenda.'))] };
+      const groups = new Map();
+      for (const l of [...S.loose].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))) { const k = l.date + ' ' + l.time; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(l); }
+      const body = [h('p', { class: 'muted small' }, 'Fotos enviadas ao grupo sem texto. Selecione as de uma mesma cirurgia e crie a ficha, ou junte a uma cirurgia que já existe. A data é a do envio da foto.')];
+      for (const [k, arr] of groups) {
+        body.push(h('div', { class: 'month-head' }, h('span', null, `Enviadas em ${ddmmyyyy(k.slice(0, 10))} às ${k.slice(11)}`), h('span', { class: 'num' }, plural(arr.length, 'foto', 'fotos'))));
+        body.push(h('div', { class: 'pgrid' }, arr.map((l) => h('div', { class: 'ptile' + (sel.has(l.id) ? ' sel' : ''), role: 'checkbox', 'aria-checked': String(sel.has(l.id)), tabindex: '0', onclick: (e) => { if (e.target.closest('.zoom')) return; sel.has(l.id) ? sel.delete(l.id) : sel.add(l.id); api.update(); } },
+          photoImg(l.photoId, true), h('span', { class: 'chk' }, sel.has(l.id) ? icon('check') : null),
+          h('button', { class: 'zoom', type: 'button', 'aria-label': 'Ver foto', onclick: () => openViewer(arr.map((x) => x.photoId), arr.indexOf(l)) }, icon('zoom'))))));
+      }
+      const chosen = () => S.loose.filter((l) => sel.has(l.id));
+      const foot = [
+        h('button', { class: 'btn primary', type: 'button', disabled: !sel.size, onclick: () => {
+          const ls = chosen(); const first = ls[0];
+          sheetRecord(newRecord({ date: first.date, time: null, photoIds: ls.map((l) => l.photoId), revisar: [] }), { dirty: true, onSaved: async () => { await removeLoose(ls, false); sel.clear(); api.update(); } });
+        } }, sel.size ? `Nova cirurgia (${sel.size})` : 'Nova cirurgia'),
+        h('button', { class: 'btn', type: 'button', disabled: !sel.size, onclick: () => {
+          const ls = chosen();
+          sheetPick('Juntar a qual cirurgia?', S.records, async (t) => { const r = S.records.find((x) => x.id === t.id); r.photoIds.push(...ls.map((l) => l.photoId)); await saveRecord(r); await removeLoose(ls, false); sel.clear(); derive(); render(); api.update(); toast('Fotos juntadas à cirurgia.'); });
+        } }, 'Juntar'),
+        h('button', { class: 'btn', type: 'button', disabled: !sel.size, 'aria-label': 'Descartar fotos selecionadas', onclick: async () => {
+          const ls = chosen();
+          if (!(await confirmDialog({ title: `Descartar ${plural(ls.length, 'foto', 'fotos')}?`, text: 'Elas saem deste app e não voltam numa próxima importação. No WhatsApp continuam.', ok: 'Descartar', danger: true }))) return;
+          await removeLoose(ls, true); sel.clear(); render(); api.update();
+        } }, icon('trash', 'sm'))];
+      return { body, foot };
+    } });
+    return api;
+  }
+  async function removeLoose(ls, deletePhoto) {
+    for (const l of ls) {
+      if (deletePhoto) await deletePhotos([l.photoId]);
+      S.ignored.add(l.key); await Store.put('ignored', { key: l.key });
+      await Store.del('loose', l.id);
+    }
+    const ids = new Set(ls.map((l) => l.id)); S.loose = S.loose.filter((l) => !ids.has(l.id));
+    render();
+  }
+
+  // ================= termos =================
+  function sheetTerms() {
+    let q = '';
+    const api = openSheet({ title: 'Termos e apelidos', render(api) {
+      const inp = h('input', { type: 'search', placeholder: 'Buscar termo', value: q, autocomplete: 'off', 'aria-label': 'Buscar termo' });
+      const box = h('div', { class: 'section' });
+      const draw = () => {
+        const nq = C.norm(q); const kids = [];
+        for (const type of ['col', 'hosp', 'proc', 'conv', 'ign']) {
+          const ts = S.terms.filter((t) => t.type === type && (!nq || C.norm(t.name + ' ' + (t.aliases || []).join(' ')).includes(nq))).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+          if (!ts.length) continue;
+          kids.push(h('div', { class: 'section-title' }, { col: 'Colegas', hosp: 'Hospitais', proc: 'Procedimentos', conv: 'Convênios', ign: 'Ignorados nas legendas' }[type]));
+          kids.push(h('div', { class: 'list-card' }, ts.map((t) => h('button', { class: 'li', type: 'button', onclick: () => sheetTermEdit(t, () => api.update()) },
+            h('span', { class: 't' }, t.name, h('span', null, (t.aliases || []).filter((a) => a !== C.norm(t.name)).slice(0, 6).join(', ') || 'Sem apelidos')), icon('chev', 'chev')))));
+        }
+        box.replaceChildren(...kids);
+      };
+      inp.addEventListener('input', () => { q = inp.value; draw(); }); draw();
+      return { body: [h('p', { class: 'muted small' }, 'É assim que o app lê as legendas e os repasses. Apelidos são outras formas de escrever o mesmo termo, como CVL para colecistectomia videolaparoscópica.'), h('div', { class: 'search' }, icon('search'), inp), box],
+        foot: h('button', { class: 'btn', type: 'button', onclick: () => sheetTermEdit(null, () => api.update()) }, icon('plus'), 'Novo termo') };
+    } });
+    return api;
+  }
+  function sheetTermEdit(term, onDone) {
+    const t = term ? JSON.parse(JSON.stringify(term)) : { id: C.uid('t'), type: 'proc', name: '', aliases: [] };
+    const oldName = term ? term.name : null;
+    let aliasTxt = (t.aliases || []).filter((a) => a !== C.norm(t.name)).join(', ');
+    const api = openSheet({ title: term ? 'Editar termo' : 'Novo termo', back: true, render(api) {
+      const nameIn = h('input', { type: 'text', value: t.name, autocomplete: 'off', oninput: (e) => { t.name = e.target.value; } });
+      const typeSel = h('select', { onchange: (e) => { t.type = e.target.value; } }, Object.entries(C.TYPE_LABEL).map(([k, l]) => h('option', { value: k, selected: k === t.type }, l)));
+      const al = h('textarea', { rows: 3, oninput: (e) => { aliasTxt = e.target.value; } }); al.value = aliasTxt;
+      const body = [h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, field('Nome', nameIn), field('Tipo', typeSel, '"Ignorar" faz o app pular essa palavra nas legendas.'), field('Apelidos', al, 'Separe por vírgula. Ex.: cvl, colecisto vlp'))];
+      if (term) body.push(h('button', { class: 'btn ghost', type: 'button', style: 'color:var(--danger)', onclick: async () => {
+        if (!(await confirmDialog({ title: 'Excluir este termo?', text: 'As cirurgias que já usam esse nome não mudam. Nas próximas importações, a palavra volta a ser tratada como nova.', ok: 'Excluir', danger: true }))) return;
+        S.terms = S.terms.filter((x) => x.id !== t.id); await Store.del('terms', t.id); derive(); render(); onDone && onDone(); api.close(true);
+      } }, icon('trash', 'sm'), 'Excluir termo'));
+      return { body, foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+        t.name = (t.name || '').trim(); if (!t.name) { toast('Informe o nome.'); return; }
+        t.aliases = uniq([C.norm(t.name), ...aliasTxt.split(',').map((a) => C.norm(a))]);
+        if (t.type === 'proc' && !t.fam) t.fam = C.norm(t.name).split(' ')[0];
+        const i = S.terms.findIndex((x) => x.id === t.id); if (i >= 0) S.terms[i] = t; else S.terms.push(t);
+        await Store.put('terms', t);
+        if (oldName && oldName !== t.name) await renameEverywhere(term.type, oldName, t.name);
+        derive(); render(); onDone && onDone(); api.close(true); toast('Termo salvo.');
+      } }, 'Salvar') };
+    } });
+    return api;
+  }
+  async function renameEverywhere(type, from, to) {
+    const changed = [];
+    for (const r of S.records) {
+      let ch = false;
+      if (type === 'proc' && r.procs.includes(from)) { r.procs = r.procs.map((p) => (p === from ? to : p)); ch = true; }
+      if (type === 'col' && (r.cols || []).includes(from)) { r.cols = r.cols.map((p) => (p === from ? to : p)); ch = true; }
+      if (type === 'hosp' && r.hosp === from) { r.hosp = to; ch = true; }
+      if (type === 'conv' && r.conv === from) { r.conv = to; ch = true; }
+      if (type === 'proc') for (const l of r.rep || []) if (l.procName === from) { l.procName = to; ch = true; }
+      if (ch) changed.push(r);
+    }
+    await Store.putMany('records', changed);
+  }
+
+  // ================= repasses importados =================
+  function sheetRepasses() {
+    const api = openSheet({ title: 'Repasses importados', back: true, render(api) {
+      if (!S.repasses.length) return { body: [h('div', { class: 'empty' }, icon('file'), h('p', null, 'Nenhum repasse importado ainda.'), h('button', { class: 'btn primary', type: 'button', onclick: pickFile }, 'Importar repasse'))] };
+      const reps = [...S.repasses].sort((a, b) => (b.importedAt || 0) - (a.importedAt || 0));
+      return { body: [h('div', { class: 'list-card' }, reps.map((d) => h('div', { class: 'li' }, icon('file'),
+        h('span', { class: 't' }, `${d.numero ? 'Repasse nº ' + d.numero : d.nome || 'Repasse'}${d.comp ? ' · comp. ' + d.comp : ''}`, h('span', null, `${plural(d.n, 'linha', 'linhas')} · ${brl(d.total)} · pago em ${ddmmyyyy(d.pay)}${d.hosp ? ' · ' + d.hosp : ''}`)),
+        h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (await undoRepasse(d, true)) api.update(); } }, 'Desfazer'))))] };
+    } });
+    return api;
+  }
+  async function undoRepasse(doc, ask) {
+    if (ask && !(await confirmDialog({ title: 'Desfazer este repasse?', text: 'As cirurgias que ele deu baixa voltam a ficar em aberto, e as que ele criou são apagadas.', ok: 'Desfazer', danger: true }))) return false;
+    for (const r of [...S.records]) {
+      if (!(r.recebido && r.recebido.repId === doc.id)) continue;
+      if (r.origem === 'repasse') await deleteRecord(r);
+      else { r.status = 'aberto'; r.recebido = null; r.rep = []; await saveRecord(r); }
+    }
+    S.repasses = S.repasses.filter((x) => x.id !== doc.id); await Store.del('repasses', doc.id);
+    derive(); render(); if (ask) toast('Repasse desfeito.');
+    return true;
+  }
+
+  // ================= importação =================
+  function pickFile() {
+    const inp = $('#file-in'); inp.value = '';
+    inp.onchange = async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      try { await routeFile(f); } catch (e) { console.error(e); await confirmDialog({ title: 'Não deu para importar', text: (e && e.message) || String(e), ok: 'Entendi', cancel: false }); }
+    };
+    inp.click();
+  }
+  function pickPhotos(cb) {
+    const inp = $('#photo-in'); inp.value = '';
+    inp.onchange = () => { const fs = [...(inp.files || [])]; if (fs.length) cb(fs); };
+    inp.click();
+  }
+  async function routeFile(file) {
+    let zip = null;
+    try { zip = await C.zipOpen(file); } catch (e) { zip = null; }
+    if (zip) {
+      if (zip.entries.some((e) => e.name === 'xl/workbook.xml')) return flowRepasse(file);
+      if (zip.entries.some((e) => e.base === 'dados.json')) return flowRestore(file, zip);
+      if (zip.entries.some((e) => /\.txt$/i.test(e.base))) return flowWhatsApp(file, zip);
+      throw new Error('Não reconheci o conteúdo deste .zip. Envie a conversa exportada do WhatsApp, um repasse (.xlsx) ou um backup deste app.');
+    }
+    const head = await file.slice(0, 4000).text();
+    if (/^\s*\{/.test(head)) return flowRestore(file, null);
+    if (/\[\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d{2} - /.test(head)) return flowWhatsApp(file, null);
+    throw new Error('Este arquivo não é uma conversa do WhatsApp, um repasse (.xlsx) nem um backup deste app.');
+  }
+  function clearDemo() {
+    if (!S.demo) return;
+    S.records = S.records.filter((r) => !r.demo); S.repasses = S.repasses.filter((r) => !r.demo); S.terms = S.terms.filter((t) => !t.demo);
+    S.demo = false; derive(); render();
+  }
+
+  // ---- WhatsApp ----
+  async function flowWhatsApp(file, zip) {
+    const b = busy('Lendo a conversa…');
+    let chat, g;
+    try {
+      let text;
+      if (zip) { const te = zip.entries.find((e) => e.base === '_chat.txt') || zip.entries.find((e) => /\.txt$/i.test(e.base)); text = await (await C.zipEntryBlob(zip, te)).text(); }
+      else text = await file.text();
+      chat = C.parseChat(text); g = C.groupMessages(chat.messages);
+    } finally { b.done(); }
+    if (!chat.messages.length) throw new Error('Não encontrei mensagens neste arquivo.');
+    clearDemo();
+    const byKey = () => new Map(S.records.filter((r) => r.key).map((r) => [r.key, r]));
+    const plan = () => {
+      const ex = byKey(); const lk = new Set(S.loose.map((l) => l.key));
+      const entries = g.entries.filter((e) => !ex.has(e.key) && !S.ignored.has(e.key));
+      const fill = zip ? g.entries.filter((e) => ex.has(e.key) && !ex.get(e.key).photoIds.length && e.photos.length) : [];
+      const loose = zip ? g.loose.filter((l) => l.photos.length && !lk.has(l.key) && !S.ignored.has(l.key)) : [];
+      return { entries, fill, loose, ex };
+    };
+    let p = plan();
+    const unknown = C.collectUnknown(p.entries, S.index);
+    const choice = new Map(unknown.map((u) => [u.norm, u.guess]));
+    const st = { step: unknown.length ? 'termos' : 'resumo', done: null };
+    let recs = [];
+    const api = openSheet({ title: 'Importar conversa', render(api) {
+      if (st.step === 'termos') {
+        return { body: [
+          h('p', null, h('b', null, 'Nomes que ainda não conheço. '), 'Confira como cada um deve ser lido. Isso só é perguntado uma vez; depois o app reconhece sozinho.'),
+          h('div', { class: 'card' }, unknown.map((u) => h('div', { class: 'term-row' }, h('div', { class: 't' }, h('span', null, u.text), h('span', { class: 'muted small' }, `aparece ${u.count}×`)),
+            seg([['col', 'Colega'], ['hosp', 'Hospital'], ['proc', 'Procedimento'], ['ign', 'Ignorar']], choice.get(u.norm), (v) => { choice.set(u.norm, v); api.update(); }))))],
+          foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+            const add = unknown.map((u) => ({ id: C.uid('t'), type: choice.get(u.norm), name: u.text, aliases: [u.norm], fam: choice.get(u.norm) === 'proc' ? u.norm.split(' ')[0] : undefined }));
+            S.terms.push(...add); await Store.putMany('terms', add); derive(); p = plan(); st.step = 'resumo'; api.update();
+          } }, 'Continuar') };
+      }
+      if (st.step === 'resumo') {
+        recs = p.entries.map((e) => C.recordFromEntry(e, S.index, { chatName: chat.chatName }));
+        const nPh = recs.reduce((s, r) => s + r.photoNames.length, 0) + p.loose.reduce((s, l) => s + l.photos.length, 0);
+        const rev = recs.filter((r) => r.revisar.length).length;
+        const dates = recs.map((r) => r.date).sort();
+        if (!recs.length && !p.loose.length && !p.fill.length) return { body: [h('div', { class: 'empty' }, icon('check'), h('p', null, 'Nada de novo nesta conversa. Tudo já estava no app.'))], foot: h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Fechar') };
+        return { body: [
+          h('div', { class: 'stats' },
+            h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Cirurgias novas'), h('span', { class: 'v' }, recs.length), dates.length ? h('span', { class: 's' }, `${ddmmyyyy(dates[0])} a ${ddmmyyyy(dates[dates.length - 1])}`) : null),
+            h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Fotos sem legenda'), h('span', { class: 'v' }, p.loose.reduce((s, l) => s + l.photos.length, 0)), h('span', { class: 's' }, 'Ficam para você organizar')),
+            h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Para revisar'), h('span', { class: 'v' }, rev), h('span', { class: 's' }, 'Sem procedimento ou com observação')),
+            h('div', { class: 'stat' }, h('span', { class: 'k' }, 'Já estavam no app'), h('span', { class: 'v' }, g.entries.length - p.entries.length), p.fill.length ? h('span', { class: 's' }, `${p.fill.length} vão receber as fotos`) : null)),
+          zip ? null : banner('Conversa sem fotos', ' Este arquivo tem só o texto. As cirurgias entram sem fotos; para trazê-las, exporte de novo com "Anexar mídia" e importe o .zip.', null, null, 'photo'),
+          recs.length ? h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Como as legendas foram lidas'), h('div', { class: 'rlist' }, [...recs].sort(byDateDesc).slice(0, 40).map((r) => recordItem({ ...r, photoIds: r.photoNames }, () => {})))) : null,
+          recs.length > 40 ? h('p', { class: 'muted small' }, `E mais ${recs.length - 40}.`) : null],
+          foot: h('button', { class: 'btn primary', type: 'button', onclick: () => runImport(api) }, `Importar${nPh ? ` (${plural(nPh, 'foto', 'fotos')})` : ''}`) };
+      }
+      if (st.step === 'importando') return { body: [h('p', { id: 'imp-lab' }, 'Guardando…'), h('div', { class: 'progress' }, h('span', { id: 'imp-bar' }))] };
+      const dn = st.done;
+      return { body: [h('div', { class: 'empty' }, icon('check'), h('h2', { style: 'font-size:20px;color:var(--ink)' }, plural(dn.recs, 'cirurgia importada', 'cirurgias importadas')),
+        h('p', null, [dn.loose ? plural(dn.loose, 'foto sem legenda', 'fotos sem legenda') : null, dn.rev ? plural(dn.rev, 'para revisar', 'para revisar') : null, dn.fill ? `fotos adicionadas a ${plural(dn.fill, 'cirurgia', 'cirurgias')}` : null, dn.err ? `${dn.err} fotos não puderam ser lidas` : null].filter(Boolean).join(' · ') || 'Tudo certo.'))],
+        foot: [dn.loose ? h('button', { class: 'btn', type: 'button', onclick: () => { api.close(true); sheetLoose(); } }, 'Ver fotos sem legenda') : null, h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', {}); } }, 'Ver cirurgias')] };
+    } });
+    async function runImport(api) {
+      st.step = 'importando'; api.update();
+      const lab = () => $('#imp-lab'), bar = () => $('#imp-bar');
+      const entryOf = new Map(zip ? zip.entries.map((e) => [e.base, e]) : []);
+      const total = Math.max(1, recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0) + p.loose.reduce((s, l) => s + l.photos.length, 0));
+      let n = 0, err = 0;
+      const one = async (name) => {
+        n++; if (lab()) lab().textContent = `Guardando foto ${n} de ${total}`; if (bar()) bar().style.width = Math.round((n / total) * 100) + '%';
+        const e = entryOf.get(name); if (!e) return null;
+        try { return await storePhoto(await C.zipEntryBlob(zip, e, extType(name)), name); } catch (x) { err++; return null; }
+      };
+      for (const r of recs) { for (const nm of r.photoNames) { const id = zip ? await one(nm) : null; if (id) r.photoIds.push(id); } S.settings.seq += 1; r.num = S.settings.seq; }
+      const filled = [];
+      for (const e of p.fill) { const r = p.ex.get(e.key); for (const nm of e.photos) { const id = await one(nm); if (id) r.photoIds.push(id); } filled.push(r); }
+      const looseItems = [];
+      for (const l of p.loose) for (let i = 0; i < l.photos.length; i++) { const id = await one(l.photos[i]); if (id) looseItems.push({ id: C.uid('l'), key: l.photos.length > 1 ? `${l.key}~${i}` : l.key, date: l.date, time: l.time, photoId: id }); }
+      await Store.putMany('records', [...recs, ...filled]); S.records.push(...recs);
+      await Store.putMany('loose', looseItems); S.loose.push(...looseItems);
+      await saveSettings(); persistStorage(); derive(); render();
+      st.done = { recs: recs.length, loose: looseItems.length, rev: recs.filter((r) => r.revisar.length).length, fill: filled.length, err };
+      st.step = 'pronto'; api.update();
+    }
+  }
+
+  // ---- repasse ----
+  function firstName(full, taken) {
+    const parts = String(full || '').split(/\s+/).filter(Boolean).map((w) => C.capFirst(w.toLowerCase()));
+    let name = parts[0] || 'Colega';
+    if (taken.some((t) => C.norm(t) === C.norm(name)) && parts[1]) name += ' ' + parts[1];
+    return name;
+  }
+  async function flowRepasse(file) {
+    const b = busy('Lendo o repasse…');
+    let rep;
+    try { rep = C.parseRepasse(await C.readXlsx(file), file.name); } finally { b.done(); }
+    if (!rep.lines.length) throw new Error('Não encontrei linhas com data e valor nesta planilha.');
+    clearDemo();
+    const hosps = namesOf('hosp');
+    const st = { step: S.repasses.some((x) => x.id === rep.id) ? 'repetido' : 'plano', hosp: S.settings.hospRepasse || (hosps.includes('UMC') ? 'UMC' : hosps[0] || ''), pay: today(), over: new Map(), unlink: new Set() };
+    const execs = uniq(rep.lines.map((l) => l.exec));
+    const colNames = namesOf('col');
+    for (const ex of execs) { const m = C.mapExecutor(ex, S.index); st.over.set(ex, m ? { col: m.term.name, how: m.how } : { col: '__novo__', how: 'novo', novo: firstName(ex, colNames) }); }
+    const tempIndex = () => {
+      const terms = S.terms.map((t) => ({ ...t, aliases: [...(t.aliases || [])] }));
+      for (const [ex, o] of st.over) { const n = C.norm(ex); if (o.col === '__novo__') terms.push({ id: 'tmp' + n, type: 'col', name: o.novo, aliases: [n] }); else { const t = terms.find((x) => x.type === 'col' && x.name === o.col); if (t) t.aliases.push(n); } }
+      return C.buildIndex(terms);
+    };
+    let acts = [];
+    const replan = () => { acts = C.planRepasse(rep, S.records, tempIndex(), { hosp: st.hosp || null }); };
+    replan();
+    const api = openSheet({ title: 'Importar repasse', render(api) {
+      if (st.step === 'repetido') {
+        const old = S.repasses.find((x) => x.id === rep.id);
+        return { body: [h('div', { class: 'banner' }, icon('info'), h('div', null, h('b', null, 'Este repasse já foi importado'), ` em ${ddmmyyyy(C.todayStr(new Date(old.importedAt)))}. Importar de novo desfaz a importação anterior e aplica esta.`))],
+          foot: [h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Cancelar'), h('button', { class: 'btn primary', type: 'button', onclick: async () => { await undoRepasse(old, false); replan(); st.step = 'plano'; api.update(); } }, 'Importar de novo')] };
+      }
+      if (st.step === 'pronto') {
+        return { body: [h('div', { class: 'empty' }, icon('check'), h('h2', { style: 'font-size:20px;color:var(--ink)' }, `Repasse de ${brl(rep.total)} importado`),
+          h('p', null, `${plural(st.res.matched, 'cirurgia do WhatsApp recebeu baixa', 'cirurgias do WhatsApp receberam baixa')} · ${plural(st.res.created, 'cirurgia nova', 'cirurgias novas')} (não estavam no WhatsApp)`))],
+          foot: h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', { status: 'recebido' }); } }, 'Ver recebidas') };
+      }
+      const hospSel = h('select', { onchange: (e) => { st.hosp = e.target.value; replan(); api.update(); } }, h('option', { value: '' }, 'Não sei / vários'), hosps.map((x) => h('option', { value: x, selected: x === st.hosp }, x)));
+      const payIn = h('input', { type: 'date', value: st.pay, oninput: (e) => { st.pay = e.target.value; } });
+      const matched = acts.filter((a) => a.recordId && !st.unlink.has(a.recordId));
+      const fresh = acts.filter((a) => !a.recordId || st.unlink.has(a.recordId));
+      const colName = (a) => { const o = st.over.get(a.exec); return o ? (o.col === '__novo__' ? o.novo : o.col) : a.exec || ''; };
+      const actHead = (a) => h('div', { class: 'l1' }, h('span', null, h('b', { class: 'mono' }, `${ddmm(a.date)} ${a.time || ''}`), ' ', a.procNames.join(' + '), h('span', { class: 'muted' }, ` · ${colName(a)}`)), h('b', { class: 'mono' }, brl(a.valor)));
+      const body = [
+        h('div', { class: 'card' }, h('dl', { class: 'kv' },
+          h('dt', null, 'Repasse'), h('dd', null, rep.numero ? 'nº ' + rep.numero : rep.nome),
+          rep.comp ? h('dt', null, 'Competência') : null, rep.comp ? h('dd', null, rep.comp) : null,
+          h('dt', null, 'Linhas'), h('dd', null, rep.lines.length),
+          h('dt', null, 'Total'), h('dd', null, brl(rep.total)))),
+        h('div', { class: 'grid2' }, field('Hospital do repasse', hospSel), field('Data do pagamento', payIn, 'Ajuste se o repasse for antigo.')),
+        execs.length ? h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Médico executor'),
+          h('div', { class: 'card' }, execs.map((ex) => { const o = st.over.get(ex);
+            const sel = h('select', { 'aria-label': 'Colega para ' + ex, onchange: (e) => { st.over.set(ex, e.target.value === '__novo__' ? { col: '__novo__', how: 'novo', novo: firstName(ex, colNames) } : { col: e.target.value, how: 'escolhido' }); replan(); api.update(); } },
+              colNames.map((c) => h('option', { value: c, selected: o.col === c }, c)), h('option', { value: '__novo__', selected: o.col === '__novo__' }, 'Novo colega: ' + firstName(ex, colNames)));
+            return h('div', { class: 'term-row' }, h('div', { class: 't' }, h('span', null, ex), o.how === 'parecido' ? h('span', { class: 'pill warn' }, 'confira') : null), sel); }))) : null,
+        h('div', { class: 'section' }, h('div', { class: 'section-title' }, `Dão baixa em cirurgias do WhatsApp (${matched.length})`),
+          matched.length ? h('div', { class: 'card' }, matched.map((a) => { const r = S.records.find((x) => x.id === a.recordId);
+            return h('div', { class: 'act' }, actHead(a), h('div', { class: 'to' }, icon('check'), h('span', null, `Cirurgia ${r.num ? 'nº ' + r.num + ' · ' : ''}${ddmm(r.date)} ${r.time || ''} · ${procText(r)} · ${[r.hosp, (r.cols || []).join(', ')].filter(Boolean).join(' · ')}`)),
+              h('div', { class: 'row' }, a.certeza === 'confira' ? h('span', { class: 'pill warn' }, 'confira') : h('span', { class: 'pill ok' }, 'mesmo dia, colega e procedimento'), h('button', { class: 'btn sm ghost', type: 'button', onclick: () => { st.unlink.add(a.recordId); api.update(); } }, 'Não é esta'))); }))
+            : h('p', { class: 'muted small' }, 'Nenhuma linha deste repasse corresponde a uma cirurgia em aberto do WhatsApp.')),
+        fresh.length ? h('div', { class: 'section' }, h('div', { class: 'section-title' }, `Entram como cirurgias novas (${fresh.length})`),
+          h('p', { class: 'muted small' }, 'Cirurgias que não estão no WhatsApp, como as que incluíram seu nome sem avisar. Entram já como recebidas.'),
+          h('div', { class: 'card' }, fresh.map((a) => h('div', { class: 'act' }, actHead(a), st.unlink.has(a.recordId) ? h('button', { class: 'btn sm ghost', type: 'button', onclick: () => { st.unlink.delete(a.recordId); api.update(); } }, 'Voltar a associar') : null)))) : null];
+      return { body, foot: h('button', { class: 'btn primary', type: 'button', onclick: () => apply(api) }, `Confirmar ${brl(rep.total)}`) };
+    } });
+    async function apply(api) {
+      const termsAdd = [], termsUpd = [];
+      for (const [ex, o] of st.over) {
+        const n = C.norm(ex);
+        if (o.col === '__novo__') { if (!termsAdd.some((t) => t.name === o.novo)) termsAdd.push({ id: C.uid('t'), type: 'col', name: o.novo, aliases: [n] }); }
+        else { const t = S.terms.find((x) => x.type === 'col' && x.name === o.col); if (t && !t.aliases.includes(n)) { t.aliases.push(n); termsUpd.push(t); } }
+      }
+      for (const l of rep.lines) {
+        if (!C.mapRepasseProc(l.proc, S.index) && !termsAdd.some((t) => t.type === 'proc' && t.aliases[0] === C.norm(l.proc))) {
+          const n = C.norm(l.proc); const key = n.split(' ').find((w) => w.length > 3) || n.split(' ')[0];
+          termsAdd.push({ id: C.uid('t'), type: 'proc', name: C.sentenceCase(l.proc), fam: key, aliases: [n], kw: [[key]] });
+        }
+        if (l.conv && !S.terms.some((t) => t.type === 'conv' && C.norm(t.name) === C.norm(l.conv)) && !termsAdd.some((t) => t.type === 'conv' && C.norm(t.name) === C.norm(l.conv))) termsAdd.push({ id: C.uid('t'), type: 'conv', name: l.conv, aliases: [C.norm(l.conv)] });
+      }
+      S.terms.push(...termsAdd); await Store.putMany('terms', [...termsAdd, ...termsUpd]); derive();
+      const changed = []; let matched = 0, created = 0;
+      for (const a of acts) {
+        const lines = a.lines.map((l) => { const t = C.mapRepasseProc(l.proc, S.index); const procName = t ? t.name : C.sentenceCase(l.proc); return { date: l.date, time: l.time, valor: l.valor, conv: l.conv, cod: l.cod, proc: l.proc, procName, fam: C.famOf(S.index, procName), funcao: l.funcao, exec: l.exec, repId: rep.id }; });
+        const o = st.over.get(a.exec); const col = o ? (o.col === '__novo__' ? o.novo : o.col) : null;
+        const pay = { valor: a.valor, data: st.pay || today(), origem: 'repasse', repId: rep.id };
+        const r = a.recordId && !st.unlink.has(a.recordId) ? S.records.find((x) => x.id === a.recordId) : null;
+        if (r) {
+          r.status = 'recebido'; r.recebido = pay; r.rep = lines;
+          if (!r.conv) r.conv = lines[0].conv; if (!r.funcao) r.funcao = lines[0].funcao; if (!r.time && a.time) r.time = a.time;
+          if (!(r.cols || []).length && col) r.cols = [col]; if (!r.procs.length) r.procs = uniq(lines.map((l) => l.procName));
+          if (!r.hosp && st.hosp) r.hosp = st.hosp;
+          r.revisar = (r.revisar || []).filter((f) => f !== 'Sem procedimento'); r.updatedAt = Date.now();
+          changed.push(r); matched++;
+        } else {
+          S.settings.seq += 1;
+          const nr = newRecord({ num: S.settings.seq, origem: 'repasse', date: a.date, time: a.time, procs: uniq(lines.map((l) => l.procName)), hosp: st.hosp || null, cols: col ? [col] : [], conv: lines[0].conv, funcao: lines[0].funcao, status: 'recebido', recebido: pay, rep: lines });
+          S.records.push(nr); changed.push(nr); created++;
+        }
+      }
+      await Store.putMany('records', changed);
+      const doc = { id: rep.id, numero: rep.numero, comp: rep.comp, nome: rep.nome, total: rep.total, n: rep.lines.length, hosp: st.hosp || null, pay: st.pay || today(), importedAt: Date.now() };
+      S.repasses.push(doc); await Store.put('repasses', doc);
+      S.settings.hospRepasse = st.hosp || S.settings.hospRepasse; await saveSettings(); persistStorage();
+      derive(); render();
+      st.res = { matched, created }; st.step = 'pronto'; api.update();
+    }
+  }
+
+  // ---- backup ----
+  async function flowRestore(file, zip) {
+    let data;
+    try {
+      if (zip) { const e = zip.entries.find((x) => x.base === 'dados.json'); data = JSON.parse(await (await C.zipEntryBlob(zip, e)).text()); }
+      else data = JSON.parse(await file.text());
+    } catch (e) { throw new Error('Não consegui ler este backup.'); }
+    if (!data || data.app !== 'registro-cirurgias') throw new Error('Este arquivo não é um backup deste app.');
+    const ok = await confirmDialog({ title: 'Restaurar backup?', text: `Backup de ${data.exportadoEm ? ddmmyyyy(data.exportadoEm.slice(0, 10)) : 'data desconhecida'} com ${plural((data.records || []).length, 'cirurgia', 'cirurgias')}. Os dados atuais deste aparelho serão substituídos.`, ok: 'Restaurar', danger: true });
+    if (!ok) return;
+    const b = busy('Restaurando…');
+    try {
+      const keepPin = { pinHash: S.settings.pinHash, pinSalt: S.settings.pinSalt };
+      for (const s of STORES) await Store.clear(s);
+      urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear();
+      await Store.putMany('records', data.records || []);
+      await Store.putMany('terms', data.terms || []);
+      await Store.putMany('repasses', data.repasses || []);
+      await Store.putMany('loose', data.loose || []);
+      await Store.putMany('ignored', (data.ignored || []).map((key) => ({ key })));
+      await Store.put('meta', { ...DEFAULT_SETTINGS, ...(data.settings || {}), ...keepPin, k: 'settings' });
+      if (zip) {
+        const fotos = zip.entries.filter((e) => /^fotos\/[^/]+$/.test(e.name) && !/\.t\.[a-z]+$/i.test(e.name));
+        let i = 0;
+        for (const e of fotos) {
+          const id = e.base.replace(/\.[a-z0-9]+$/i, '');
+          const buf = await (await C.zipEntryBlob(zip, e)).arrayBuffer();
+          const te = zip.entries.find((x) => x.name.startsWith('fotos/' + id + '.t.'));
+          const tbuf = te ? await (await C.zipEntryBlob(zip, te)).arrayBuffer() : null;
+          await Store.put('photos', { id, name: e.base, type: extType(e.base), buf, tbuf });
+          b.set(++i / fotos.length, `Restaurando fotos ${i} de ${fotos.length}`);
+        }
+      }
+      S.demo = false; await load(); persistStorage();
+    } finally { b.done(); }
+    go('inicio'); toast('Backup restaurado.');
+  }
+  const typeExt = (t) => ({ 'image/png': 'png', 'image/heic': 'heic', 'image/webp': 'webp', 'image/gif': 'gif' }[t] || 'jpg');
+  async function exportBackup() {
+    if (PREVIEW) { await confirmDialog({ title: 'Backup só no app instalado', text: 'Nesta prévia nada fica salvo e o navegador não deixa gravar arquivos. Depois de instalar, este botão gera um .zip com tudo para guardar em Arquivos.', ok: 'Entendi', cancel: false }); return; }
+    const b = busy('Preparando o backup…');
+    let blob;
+    try {
+      const data = { app: 'registro-cirurgias', versao: 1, exportadoEm: new Date().toISOString(), records: S.records, terms: S.terms, repasses: S.repasses, loose: S.loose, ignored: [...S.ignored], settings: { ...S.settings, lastBackup: today(), pinHash: null, pinSalt: null } };
+      const files = [{ name: 'dados.json', data: JSON.stringify(data) }];
+      const photos = await Store.all('photos');
+      for (const p of photos) { files.push({ name: `fotos/${p.id}.${typeExt(p.type)}`, data: new Uint8Array(p.buf) }); if (p.tbuf) files.push({ name: `fotos/${p.id}.t.jpg`, data: new Uint8Array(p.tbuf) }); }
+      blob = await C.zipWrite(files);
+    } finally { b.done(); }
+    const ok = await offerFile(blob, `cirurgias-backup-${today()}.zip`, 'application/zip', 'Backup pronto', `${plural(S.records.length, 'cirurgia', 'cirurgias')}, ${(blob.size / 1048576).toFixed(1).replace('.', ',')} MB. Salve em Arquivos (iCloud Drive ou Google Drive) para ter uma cópia fora do iPhone.`);
+    if (ok) { S.settings.lastBackup = today(); await saveSettings(); render(); }
+  }
+  function csvCell(v) { const s = v == null ? '' : String(v); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+  async function exportCSV() {
+    if (PREVIEW) { await confirmDialog({ title: 'Disponível no app instalado', text: 'Nesta prévia o navegador não deixa gravar arquivos.', ok: 'Entendi', cancel: false }); return; }
+    const head = ['Nº', 'Data', 'Hora', 'Urgência', 'Procedimentos', 'Hospital', 'Colegas', 'Função', 'Convênio', 'Situação', 'Valor recebido', 'Data do pagamento', 'Valor previsto ou estimado', 'Origem', 'Repasse', 'Fotos', 'Legenda'];
+    const money = (v) => (v == null ? '' : nf2.format(v).replace(/\./g, ''));
+    const rows = [...S.records].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).map((r) => {
+      const v = valueOf(r); const rp = r.recebido || {};
+      return [r.num || '', ddmmyyyy(r.date), r.time || '', urgOf(r) ? 'sim' : '', procText(r), r.hosp || '', (r.cols || []).join(', '), r.funcao || '', r.conv || '', { aberto: 'Em aberto', recebido: 'Recebido', semcobranca: 'Sem cobrança' }[r.status],
+        r.status === 'recebido' ? money(rp.valor) : '', rp.data ? ddmmyyyy(rp.data) : '', isOpen(r) ? money(v.v) : '', r.origem, (S.repasses.find((x) => x.id === rp.repId) || {}).numero || '', (r.photoIds || []).length, (r.caption || '').replace(/\s+/g, ' ')];
+    });
+    const text = '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
+    await offerFile(new Blob([text], { type: 'text/csv;charset=utf-8' }), `cirurgias-${today()}.csv`, 'text/csv', 'Planilha pronta', `${plural(rows.length, 'cirurgia', 'cirurgias')}. Abre no Excel, no Numbers e no Google Planilhas.`);
+  }
+  function offerFile(blob, name, type, title, text) {
+    return new Promise((res) => {
+      let done = false;
+      const api = openSheet({ title, onClose: () => { if (!done) res(false); }, render() {
+        return { body: [h('div', { class: 'empty' }, icon('file'), h('b', { style: 'color:var(--ink)' }, name), h('p', null, text))],
+          foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+            let file = new File([blob], name, { type });
+            try {
+              if (navigator.canShare && !navigator.canShare({ files: [file] })) { const alt = new File([blob], name, { type: 'application/octet-stream' }); if (navigator.canShare({ files: [alt] })) file = alt; }
+              if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: name });
+              else { const u = URL.createObjectURL(blob); const a = h('a', { href: u, download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 4000); }
+              done = true; res(true); api.close(true); toast('Arquivo pronto. Confira se salvou em Arquivos.');
+            } catch (e) { if (e && e.name !== 'AbortError') toast('Não deu para salvar: ' + e.message); }
+          } }, icon('share'), 'Salvar ou compartilhar') };
+      } });
+    });
+  }
+
+  // ================= instalação =================
+  function sheetInstall() {
+    openSheet({ title: 'Instalar no iPhone', render() {
+      const body = [];
+      if (PREVIEW) {
+        body.push(h('p', null, 'Esta prévia serve para ver o app funcionando. Para usar no dia a dia, com os dados guardados no iPhone e funcionando sem internet, ele precisa ser publicado uma vez num endereço seu. O código fica público; os dados nunca saem do aparelho.'));
+        body.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, 'Uma vez só: publicar (cerca de 10 minutos)'), h('ol', { class: 'steps' },
+          h('li', null, h('span', null, 'Salve em Arquivos o pacote ', h('code', null, 'registro-cirurgias.zip'), ' que está na conversa com o Claude e toque nele para abrir a pasta.')),
+          h('li', null, h('span', null, 'Crie uma conta gratuita em ', h('b', null, 'github.com'), '. É mais rápido num computador, mas dá para fazer no Safari.')),
+          h('li', null, h('span', null, 'Crie um repositório público chamado ', h('code', null, 'cirurgias'), ' (botão "New").')),
+          h('li', null, h('span', null, 'Em "Add file → Upload files", envie os 6 arquivos da pasta e confirme em "Commit changes".')),
+          h('li', null, h('span', null, 'Em "Settings → Pages", escolha "Deploy from a branch", branch ', h('code', null, 'main'), ', pasta ', h('code', null, '/ (root)'), ', e salve. Em um ou dois minutos aparece o endereço ', h('code', null, 'seu-usuario.github.io/cirurgias'), '.')))));
+      }
+      body.push(h('div', { class: 'section' }, h('div', { class: 'section-title' }, PREVIEW ? 'Depois, no iPhone' : 'No iPhone'), h('ol', { class: 'steps' },
+        h('li', null, h('span', null, 'Abra o endereço do app no ', h('b', null, 'Safari'), '.')),
+        h('li', null, h('span', null, 'Toque em ', h('b', null, 'Compartilhar'), ' e depois em ', h('b', null, 'Adicionar à Tela de Início'), '.')),
+        h('li', null, h('span', null, 'Abra pelo ícone novo e importe a conversa do WhatsApp e os repasses.')),
+        h('li', null, h('span', null, 'Faça um backup de vez em quando. Se o ícone for apagado, os dados vão junto.')))));
+      if (!PREVIEW && !isStandalone()) body.push(h('button', { class: 'btn ghost', type: 'button', onclick: async () => { S.settings.installHidden = true; await saveSettings(); render(); toast('Aviso escondido.'); } }, 'Não mostrar mais o aviso'));
+      return { body };
+    } });
+  }
+
+  // ================= PIN =================
+  async function hashPin(pin, salt) {
+    const data = new TextEncoder().encode(salt + ':' + pin);
+    if (window.crypto && crypto.subtle) { const d = await crypto.subtle.digest('SHA-256', data); return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
+    let hsh = 0; for (const x of data) hsh = (hsh * 31 + x) | 0; return 'w' + (hsh >>> 0).toString(16);
+  }
+  function sheetPin() {
+    const st = { a: '', b: '', cur: '' };
+    openSheet({ title: 'PIN para abrir o app', back: true, render(api) {
+      const pinIn = (k, label) => field(label, h('input', { type: 'password', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 6, autocomplete: 'off', value: st[k], oninput: (e) => { st[k] = e.target.value.replace(/\D/g, ''); } }));
+      const body = [h('p', { class: 'muted' }, 'O PIN impede que alguém abra o app pelo ícone. Os dados não ficam criptografados; a proteção principal continua sendo o bloqueio do iPhone.')];
+      if (S.settings.pinHash) {
+        body.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, pinIn('cur', 'PIN atual')));
+        return { body, foot: h('button', { class: 'btn danger', type: 'button', onclick: async () => {
+          if ((await hashPin(st.cur, S.settings.pinSalt)) !== S.settings.pinHash) { toast('PIN incorreto.'); return; }
+          S.settings.pinHash = null; S.settings.pinSalt = null; await saveSettings(); render(); api.close(true); toast('PIN removido.');
+        } }, 'Remover PIN') };
+      }
+      body.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, pinIn('a', 'Novo PIN (4 a 6 números)'), pinIn('b', 'Repita o PIN')));
+      return { body, foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+        if (st.a.length < 4) { toast('Use de 4 a 6 números.'); return; }
+        if (st.a !== st.b) { toast('Os dois PINs não são iguais.'); return; }
+        S.settings.pinSalt = C.uid('s'); S.settings.pinHash = await hashPin(st.a, S.settings.pinSalt); await saveSettings(); render(); api.close(true); toast('PIN ativado.');
+      } }, 'Ativar PIN') };
+    } });
+  }
+  let locked = false;
+  function lockScreen() {
+    if (locked || !S.settings.pinHash) return Promise.resolve();
+    locked = true;
+    return new Promise((res) => {
+      const err = h('p', { class: 'err', role: 'alert' });
+      const inp = h('input', { type: 'password', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 6, autocomplete: 'off', 'aria-label': 'PIN' });
+      const tryPin = async () => { if ((await hashPin(inp.value, S.settings.pinSalt)) === S.settings.pinHash) { wrap.remove(); locked = false; res(); } else { err.textContent = 'PIN incorreto.'; inp.value = ''; inp.focus(); } };
+      const wrap = h('div', { class: 'lock' }, icon('lock'), h('h2', null, 'Registro de Cirurgias'), h('form', { class: 'form', style: 'align-items:center', onsubmit: (e) => { e.preventDefault(); tryPin(); } }, inp, err, h('button', { class: 'btn primary', type: 'submit' }, 'Entrar')));
+      document.body.append(wrap); setTimeout(() => inp.focus(), 50);
+    });
+  }
+  let hiddenAt = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) hiddenAt = Date.now();
+    else if (S.settings.pinHash && hiddenAt && Date.now() - hiddenAt > 60000) lockScreen();
+  });
+
+  // ================= dados de exemplo (prévia) =================
+  function loadDemo() {
+    const T0 = today();
+    const day = (n) => C.fromDayNum(C.dayNum(T0) - n);
+    const terms = [
+      { id: 'tdemo1', type: 'col', name: 'Dr. Alves (exemplo)', aliases: ['alves'], demo: true },
+      { id: 'tdemo2', type: 'col', name: 'Dra. Prado (exemplo)', aliases: ['prado'], demo: true },
+      { id: 'tdemo3', type: 'hosp', name: 'Hospital Central (exemplo)', aliases: ['central'], demo: true },
+      { id: 'tdemo4', type: 'hosp', name: 'Hospital Vida (exemplo)', aliases: ['vida'], demo: true },
+      { id: 'tdemo5', type: 'conv', name: 'Plano Exemplo', aliases: ['plano exemplo'], demo: true }];
+    const A = terms[0].name, P = terms[1].name, HC = terms[2].name, HV = terms[3].name;
+    let num = 0;
+    const mk = (n, time, procs, hosp, col, pago) => {
+      const r = newRecord({ num: ++num, origem: 'whatsapp', date: day(n), time, procs, hosp, cols: [col], caption: `${procs.join(' + ')} ${col.split(' ')[1]} ${hosp.split(' ')[1]}`, demo: true });
+      if (pago) {
+        const lines = procs.map((p, i) => ({ date: r.date, time, valor: pago[i], conv: 'Plano Exemplo', cod: '', proc: p.toUpperCase(), procName: p, fam: C.famOf(S.index, p), funcao: 'Primeiro Auxiliar', exec: col, repId: 'repdemo' }));
+        r.status = 'recebido'; r.recebido = { valor: C.round2(pago.reduce((s, v) => s + v, 0)), data: day(Math.max(0, n - 45)), origem: 'repasse', repId: 'repdemo' }; r.rep = lines; r.conv = 'Plano Exemplo'; r.funcao = 'Primeiro auxiliar';
+      }
+      return r;
+    };
+    const cvl = 'Colecistectomia videolaparoscópica', apvl = 'Apendicectomia videolaparoscópica', hern = 'Herniorrafia';
+    const recs = [
+      mk(140, '14:10', [cvl], HC, A, [444.02]), mk(133, '21:30', [apvl], HC, P, [288.62]), mk(126, '10:05', [apvl], HC, A, [222.01]),
+      mk(120, '20:15', [cvl], HC, P, [577.24]), mk(112, '09:40', [hern], HV, A, [310.5]),
+      mk(101, '16:20', [cvl], HV, P, null), mk(95, '22:10', [apvl], HV, A, null),
+      mk(64, '08:30', [cvl], HC, A, null), mk(51, '19:45', [apvl], HC, P, null), mk(38, '11:20', [cvl, 'Drenagem de abscesso'], HC, A, null),
+      mk(23, '15:00', [hern], HV, P, null), mk(12, '20:40', [apvl], HC, A, null), mk(6, '13:15', [cvl], HV, P, null),
+      newRecord({ num: ++num, origem: 'whatsapp', date: day(3), time: '17:50', procs: [], hosp: HC, cols: [A], caption: '(exemplo sem procedimento)', revisar: ['Sem procedimento'], demo: true })];
+    S.terms.push(...terms); S.records.push(...recs);
+    S.repasses.push({ id: 'repdemo', numero: '000123', comp: 'exemplo', nome: 'Repasse de exemplo', total: 1842.39, n: 5, hosp: HC, pay: day(70), importedAt: Date.now(), demo: true });
+    S.settings.seq = num; S.demo = true; derive();
+  }
+
+  // ================= início =================
+  async function init() {
+    try { await load(); } catch (e) {
+      $('#main').replaceChildren(h('div', { class: 'empty' }, icon('alert'), h('p', null, 'Não consegui abrir os dados deste aparelho: ' + (e && e.message))));
+      return;
+    }
+    if (PREVIEW && !S.records.length) loadDemo();
+    $('#tabbar').replaceChildren(h('div', { class: 'tabbar-in' }, [['inicio', 'home', 'Início'], ['lista', 'list', 'Cirurgias'], ['relatorios', 'chart', 'Relatórios'], ['ajustes', 'gear', 'Ajustes']]
+      .map(([t, ic, l]) => h('button', { class: 'tab', type: 'button', 'data-tab': t, onclick: () => go(t) }, icon(ic), l))));
+    render();
+    if (S.settings.pinHash) await lockScreen();
+    if (!PREVIEW && 'serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  window.__app = { S, go, render, routeFile, Store };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+
+</script>
+</body>
+</html>
