@@ -1,6 +1,6 @@
 # Roteiro de teste no iPhone
 
-Use depois de cada lote publicado no GitHub. Leva uns 25 minutos e nunca mexe nos dados da Carol: tudo acontece no **modo de teste**, um banco separado, com dados inventados.
+Use depois de cada lote publicado no GitHub. Leva uns 30 minutos e nunca mexe nos dados da Carol: tudo acontece no **modo de teste**, um banco separado, com dados inventados.
 
 Endereço do app: `goborges.github.io/Carol_Controlecirurgias`
 
@@ -86,37 +86,45 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 3. Em **Ajustes → Feriados da cidade**, **deve aparecer** Carnaval e Corpus Christi, com "Conta" e "Não conta", e o campo com 31/08. Volte sem salvar.
 4. Em **Ajustes → Lembrete no Calendário**, toque em **Criar o lembrete** e salve o arquivo em Arquivos. Abra o arquivo em **Arquivos**. **Deve aparecer** o evento "Controle de Cirurgias: conversa, planilha e backup", todo dia 5, às 19h. Toque em **Adicionar ao Calendário** e confira no Calendário. Depois, se quiser, apague o evento.
 
-## 9. Fechar e abrir de novo
+## 9. Acabamento de iPhone
+
+1. Abra uma cirurgia e arraste a barra do topo para baixo. **Deve:** a tela fechar, como em Fechar. Toque no **+** e arraste o menu para baixo: ele também fecha.
+2. No iPhone, abra **Ajustes → Tela e Brilho → Tamanho do Texto** e aumente o tamanho. Volte ao app. **Deve aparecer:** as letras maiores, sem nada cortado. Depois, volte o tamanho ao de antes.
+3. Em **Ajustes → Senha para abrir**, ligue a senha `2468`. Abra **Senha para abrir** de novo e toque em **Usar Face ID**. O iPhone pede o Face ID duas vezes: uma para criar a chave e outra para o app testar. **Deve aparecer:** "Face ID ligado".
+4. Feche a aba do Safari e abra outra vez o endereço com `?teste`. **Deve aparecer:** "Entrar com Face ID" e, embaixo, o campo da senha. Toque em **Entrar com Face ID**: o app abre.
+5. Em **Ajustes → Senha para abrir**, escreva `2468` e toque em **Desligar a senha**. O Face ID desliga junto.
+
+## 10. Fechar e abrir de novo
 
 Feche a aba do Safari e abra outra vez o endereço com `?teste`.
 
 **Deve aparecer:** as mesmas 14 cirurgias.
 
-## 10. Fazer backup
+## 11. Fazer backup
 
 Em **Ajustes → Fazer backup**, toque em **Salvar em Arquivos** e salve no iCloud Drive.
 
 **Deve aparecer:** "Backup salvo". Com poucas fotos sai um arquivo só. Com muitas, o app pede para salvar parte por parte, e todas as partes ficam na mesma pasta.
 
-## 11. Apagar e restaurar
+## 12. Apagar e restaurar
 
 1. Em **Ajustes → Apagar os dados de teste**, confirme duas vezes. **Deve aparecer** a tela de boas-vindas, vazia.
 2. Em **Ajustes → Restaurar um backup**, escolha o arquivo do backup (todas as partes juntas, se houver). **Deve aparecer** "Restaurar o backup?" com 14 cirurgias.
 3. Toque em **Restaurar**. **Deve aparecer** "Backup restaurado." e as 14 cirurgias de volta, com as fotos.
 
-## 12. Diagnóstico
+## 13. Diagnóstico
 
 Em **Ajustes → Copiar diagnóstico**, toque em **Copiar** e cole numa conversa.
 
 **Deve aparecer:** a versão do app, "modo de teste" e contagens, sem nenhum nome, procedimento ou valor.
 
-## 13. Sair do modo de teste
+## 14. Sair do modo de teste
 
 Toque em **Sair do modo de teste**, na faixa amarela.
 
 **Deve aparecer:** o app de verdade, sem nenhuma das 14 cirurgias de teste.
 
-## 14. O app instalado
+## 15. O app instalado
 
 1. Abra pelo ícone. Em Ajustes, no fim, aparece a versão nova. Na primeira abertura depois de uma versão que mexe no banco, o app pode mostrar "Atualizando o app" por alguns segundos.
 2. Ligue o modo avião e abra pelo ícone. O app abre normalmente. Depois desligue o modo avião.
