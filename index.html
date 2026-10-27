@@ -2,6 +2,10 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
+<!-- Regra de segurança: o app só carrega o que vem do próprio endereço e não se conecta a nenhum outro site.
+     Fotos aparecem por blob: (guardadas no aparelho) e ícones por data:. Estilos na própria página são permitidos;
+     eles não conseguem buscar nada fora daqui, porque imagens e fontes também ficam presas ao próprio endereço. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; media-src 'self' blob:; worker-src 'self'; manifest-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Controle de Cirurgias</title>
 <meta name="description" content="Registro pessoal de cirurgias e valores a receber. Os dados ficam só neste aparelho.">
@@ -15,9 +19,6 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -33,8 +34,7 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <input type="file" id="file-in" hidden accept=".zip,.txt,.xlsx,.json,application/zip,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
 <input type="file" id="photo-in" hidden accept="image/*" multiple>
-<!-- APP_MODE: 'app' no GitHub; a prévia do Claude usa 'preview' (cirurgias de exemplo, nada salvo). -->
-<script>window.APP_MODE = 'app';</script>
+<!-- APP_MODE: sem nada aqui, o app roda normal; a prévia do Claude define 'preview' (cirurgias de exemplo, nada salvo). -->
 <script src="core.js"></script>
 <script src="ui.js"></script>
 </body>

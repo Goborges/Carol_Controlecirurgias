@@ -115,6 +115,14 @@
       const { txt, g } = await conversa();
       igual(C.groupMessages(C.parseChat(txt).messages).entries.map((e) => e.key), g.entries.map((e) => e.key), 'chaves');
     });
+    teste('Conversa do iPhone', 'a chave de cada mensagem se lê de volta: data, hora, começo do texto e fotos', async () => {
+      const { g } = await conversa();
+      const e = g.entries.find((x) => x.caption.startsWith('CVL Bruno UMC'));
+      igual(C.describeKey(e.key), { date: '2026-09-02', time: '10:15', texto: 'cvl bruno umc', arquivos: 1, foto: null }, 'cirurgia');
+      const l = g.loose[0];
+      igual(C.describeKey(l.key + '~1'), { date: l.date, time: l.time, texto: '', arquivos: 1, foto: 1 }, 'foto solta');
+      igual([C.describeKey(''), C.describeKey('qualquer coisa')], [null, null], 'chave estranha');
+    });
     teste('Conversa do iPhone', 'sem hora na legenda, a hora do envio não vira hora da cirurgia', async () => {
       const r = doDia((await conversa()).recs, '2026-09-04');
       verdade(r.time == null || r.horaAproximada === true, `a ficha usou a hora do envio (${r.time}) como hora da cirurgia`);

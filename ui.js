@@ -3,12 +3,12 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.6';
+  const VERSION = '1.7';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
   const DB_NAME = TESTE ? 'registro-cirurgias-teste' : 'registro-cirurgias';
-  const DB_VERSION = 1;   // sobe quando o banco ganha uma lista nova
+  const DB_VERSION = 2;   // sobe quando o banco ganha uma lista nova (a 2 trouxe miniaturas, lixeira e importações)
   // ================= erros recentes (aparecem no diagnóstico; sem dados das cirurgias) =================
   const ERROS = [];
   function anotaErro(msg, onde) {
@@ -112,7 +112,8 @@
   function greeting() { const hh = new Date().getHours(); return hh < 12 ? 'Bom dia' : hh < 18 ? 'Boa tarde' : 'Boa noite'; }
 
   // ================= armazenamento =================
-  const STORES = ['records', 'photos', 'loose', 'terms', 'repasses', 'meta', 'ignored'];
+  // thumbs: miniaturas das fotos, separadas das originais. trash: a lixeira (30 dias). imports: cada conversa trazida do WhatsApp.
+  const STORES = ['records', 'photos', 'loose', 'terms', 'repasses', 'meta', 'ignored', 'thumbs', 'trash', 'imports'];
   const KEYS = { meta: 'k', ignored: 'key' };
   const Store = (() => {
     let db = null, mem = null;
@@ -122,7 +123,9 @@
     const abrir = (versao) => new Promise((res, rej) => {
       const rq = versao ? indexedDB.open(DB_NAME, versao) : indexedDB.open(DB_NAME);
       rq.onupgradeneeded = () => { const d = rq.result; for (const s of STORES) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: KEYS[s] || 'id' }); };
-      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+      // outra janela com uma versão antiga ainda segura o banco: espera ela fechar (o pedido continua de pé)
+      rq.onblocked = () => { const m = $('#main'); if (m) m.replaceChildren(h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('alert')), h('h2', null, 'Feche as outras janelas do app'), h('p', null, 'O app está terminando uma atualização. Feche as outras abas dele que estiverem abertas no Safari.'))); };
     });
     async function open() {
       if (PREVIEW || !('indexedDB' in window)) { useMem(); return 'memory'; }
@@ -151,6 +154,17 @@
       del: (s, k) => (mem ? (mem[s].delete(k), Promise.resolve()) : run(s, 'readwrite', (st) => st.delete(k))),
       clear: (s) => (mem ? (mem[s].clear(), Promise.resolve()) : run(s, 'readwrite', (st) => st.clear())),
       keys: (s) => (mem ? Promise.resolve([...mem[s].keys()]) : run(s, 'readonly', (st) => st.getAllKeys())),
+      // grava e apaga em várias listas numa operação só: ou tudo acontece, ou nada acontece
+      // ops: [{ s: 'records', put: valor } | { s: 'photos', del: chave }]
+      apply: (ops) => {
+        ops = (ops || []).filter(Boolean); if (!ops.length) return Promise.resolve();
+        if (mem) { for (const o of ops) { if ('del' in o) mem[o.s].delete(o.del); else mem[o.s].set(keyOf(o.s, o.put), o.put); } return Promise.resolve(); }
+        return new Promise((res, rej) => {
+          const t = db.transaction([...new Set(ops.map((o) => o.s))], 'readwrite');
+          for (const o of ops) { const st = t.objectStore(o.s); if ('del' in o) st.delete(o.del); else st.put(o.put); }
+          t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('a gravação foi interrompida'));
+        });
+      },
       // troca o conteúdo de várias listas de uma vez só: ou tudo muda, ou nada muda
       replaceAll: (map) => {
         const names = Object.keys(map);
@@ -167,24 +181,34 @@
   // ================= estado =================
   const DEFAULT_SETTINGS = { k: 'settings', alertDias: 90, feriados: '31/08', pinHash: null, pinSalt: null, lastBackup: null, seq: 0, hospRepasse: null, termsVersion: 0, installHidden: false, tema: 'ameixa', nome: '', grupo: '', dataVersion: 0 };
   const S = {
-    records: [], terms: [], repasses: [], loose: [], ignored: new Set(), settings: { ...DEFAULT_SETTINGS },
+    records: [], terms: [], repasses: [], loose: [], ignored: new Set(), ignoredInfo: new Map(), trash: [], imports: [], settings: { ...DEFAULT_SETTINGS },
     index: null, refs: null, hol: [], checks: [], tab: 'inicio', demo: false, storage: 'idb',
     f: { q: '', status: 'todas', periodo: 'tudo', col: '', hosp: '', conv: '' }, selecting: false, sel: new Set(), relTab: 'meses',
   };
   async function load() {
     S.storage = await Store.open();
-    const [records, terms, repasses, loose, meta, ignored] = await Promise.all(['records', 'terms', 'repasses', 'loose', 'meta', 'ignored'].map((s) => Store.all(s)));
-    S.records = records; S.repasses = repasses; S.loose = loose; S.ignored = new Set(ignored.map((x) => x.key));
+    const [records, terms, repasses, loose, meta, ignored, trash, imports] = await Promise.all(['records', 'terms', 'repasses', 'loose', 'meta', 'ignored', 'trash', 'imports'].map((s) => Store.all(s)));
+    S.records = records; S.repasses = repasses; S.loose = loose; S.trash = trash; S.imports = imports;
+    S.ignored = new Set(ignored.map((x) => x.key)); S.ignoredInfo = new Map(ignored.map((x) => [x.key, x]));
     S.settings = { ...DEFAULT_SETTINGS, ...(meta.find((m) => m.k === 'settings') || {}) };
     S.terms = terms;
     const er = meta.find((m) => m.k === 'erros'); if (er && Array.isArray(er.lista)) ERROS.splice(0, ERROS.length, ...er.lista.slice(-20));
     await migrate();
+    // a numeração das fichas nunca anda para trás, mesmo se o app fechou no meio de uma importação
+    const maior = Math.max(0, ...S.records.map((r) => r.num || 0), ...S.trash.map((x) => (x.rec && x.rec.num) || 0));
+    if (maior > (S.settings.seq || 0)) S.settings.seq = maior;
+    // com dados de uma versão mais nova do app, não apaga nada: ela pode usar fotos de um jeito que esta não conhece
+    if (!S.dadosNovos) {
+      try { await esvaziarLixeiraAntiga(); await limparOrfas(); } catch (e) { anotaErro(e && e.message, 'limpeza'); }
+    }
+    if (!PREVIEW) segurarTrava();
     applyTheme(); derive();
   }
   // ================= versão dos dados =================
   // Cada mudança no formato salvo entra aqui como uma migração numerada, feita uma vez só e na ordem.
   // A versão viaja junto no backup: restaurar um backup antigo roda as migrações que faltam.
   // 'copia' = listas guardadas antes de mexer (em Ajustes > Copiar diagnóstico aparece que a cópia existe).
+  // Uma migração longa recebe progresso(i, n): com muitas fotos, aparece "Atualizando o app".
   const MIGRATIONS = [
     { v: 1, nome: 'nomes e abreviações padrão', async run() {
       if ((S.settings.termsVersion || 0) >= TERMS_VERSION) return;
@@ -193,20 +217,38 @@
       S.terms.push(...add); await Store.putMany('terms', add);
       S.settings.termsVersion = TERMS_VERSION;
     } },
+    // Até a 1.6, a miniatura ficava no mesmo registro da foto: mostrar uma miniatura lia a foto inteira.
+    // Agora ela fica na lista 'thumbs'. A migração copia cada miniatura, uma foto por vez; a antiga fica onde estava,
+    // como cópia, até uma próxima versão confirmar que está tudo certo. Se parar no meio, continua na próxima abertura.
+    { v: 2, nome: 'miniaturas numa lista separada', async run(progresso) {
+      const ids = await Store.keys('photos'); const tem = new Set(await Store.keys('thumbs'));
+      let i = 0;
+      for (const id of ids) {
+        if (!tem.has(id)) { const p = await Store.get('photos', id); if (p && p.tbuf) await Store.put('thumbs', { id, buf: p.tbuf }); }
+        progresso(++i, ids.length);
+      }
+    } },
   ];
   const DATA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].v;
   async function migrate() {
     let v = S.settings.dataVersion || 0;
     if (v > DATA_VERSION) { S.dadosNovos = true; return; } // dados de uma versão mais nova do app: não mexe em nada
-    for (const m of MIGRATIONS) {
-      if (m.v <= v) continue;
-      if (m.copia) {
-        const copia = {}; for (const st of m.copia) copia[st] = await Store.all(st);
-        await Store.put('meta', { k: 'copia-migracao-' + m.v, em: new Date().toISOString(), dados: copia });
+    let aviso = null;
+    const progresso = (i, n) => {
+      if (!aviso && n > 30) aviso = busy('Atualizando o app…');
+      if (aviso) aviso.set(i / n, `Preparando as fotos: ${i} de ${n}`);
+    };
+    try {
+      for (const m of MIGRATIONS) {
+        if (m.v <= v) continue;
+        if (m.copia) {
+          const copia = {}; for (const st of m.copia) copia[st] = await Store.all(st);
+          await Store.put('meta', { k: 'copia-migracao-' + m.v, em: new Date().toISOString(), dados: copia });
+        }
+        await m.run(progresso);
+        v = m.v; S.settings.dataVersion = v; await saveSettings();
       }
-      await m.run();
-      v = m.v; S.settings.dataVersion = v; await saveSettings();
-    }
+    } finally { if (aviso) aviso.done(); }
   }
   function derive() {
     S.index = C.buildIndex(S.terms);
@@ -216,8 +258,11 @@
   }
   function applyTheme() { document.documentElement.setAttribute('data-tema', S.settings.tema || 'ameixa'); }
   const saveSettings = () => Store.put('meta', S.settings);
-  async function saveRecord(r) {
+  // editadaEm marca uma mudança feita por ela (desfazer uma importação avisa quando vai levar junto essas mudanças);
+  // sistema: true para o que o próprio app desfaz, como uma planilha
+  async function saveRecord(r, opts) {
     r.updatedAt = Date.now();
+    if (!(opts && opts.sistema)) r.editadaEm = r.updatedAt;
     const i = S.records.findIndex((x) => x.id === r.id);
     if (i >= 0) S.records[i] = r; else S.records.push(r);
     await Store.put('records', r);
@@ -244,22 +289,33 @@
     if (src.close) src.close();
     return new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error('thumb'))), 'image/jpeg', 0.74));
   }
+  // A foto original fica em 'photos' e a miniatura em 'thumbs', gravadas juntas numa operação só.
   async function storePhoto(blob, name) {
     const id = C.uid('p');
     const type = blob.type || extType(name);
     const buf = await blob.arrayBuffer();
     let tbuf = null;
     try { tbuf = await (await makeThumb(new Blob([buf], { type }), 480)).arrayBuffer(); } catch (e) { tbuf = null; }
-    await Store.put('photos', { id, name: name || '', type, buf, tbuf });
+    await Store.apply([{ s: 'photos', put: { id, name: name || '', type, buf } }, tbuf ? { s: 'thumbs', put: { id, buf: tbuf } } : null]);
     return id;
   }
+  // miniatura: lê só a lista 'thumbs'. Se faltar, usa a do lugar antigo (fotos de antes da 1.7) ou a foto inteira,
+  // e já deixa uma miniatura pronta para a próxima vez.
   async function photoURL(id, thumb) {
     const k = id + (thumb ? ':t' : '');
     if (urlCache.has(k)) return urlCache.get(k);
-    const p = await Store.get('photos', id);
-    if (!p) return null;
-    const buf = thumb && p.tbuf ? p.tbuf : p.buf;
-    const u = URL.createObjectURL(new Blob([buf], { type: thumb && p.tbuf ? 'image/jpeg' : p.type }));
+    let blob = null;
+    if (thumb) { const t = await Store.get('thumbs', id); if (t && t.buf) blob = new Blob([t.buf], { type: 'image/jpeg' }); }
+    if (!blob) {
+      const p = await Store.get('photos', id);
+      if (!p) return null;
+      if (thumb && p.tbuf) { blob = new Blob([p.tbuf], { type: 'image/jpeg' }); Store.put('thumbs', { id, buf: p.tbuf }).catch(() => {}); }
+      else {
+        blob = new Blob([p.buf], { type: p.type });
+        if (thumb) makeThumb(blob, 480).then((b) => b.arrayBuffer()).then((buf) => Store.put('thumbs', { id, buf })).catch(() => {});
+      }
+    }
+    const u = URL.createObjectURL(blob);
     urlCache.set(k, u); return u;
   }
   function photoImg(id, thumb) {
@@ -267,11 +323,57 @@
     photoURL(id, thumb).then((u) => { if (u) im.src = u; });
     return im;
   }
+  function soltarURL(id) { for (const k of [id, id + ':t']) if (urlCache.has(k)) { URL.revokeObjectURL(urlCache.get(k)); urlCache.delete(k); } }
   async function deletePhotos(ids) {
-    for (const id of ids || []) {
-      await Store.del('photos', id);
-      for (const k of [id, id + ':t']) if (urlCache.has(k)) { URL.revokeObjectURL(urlCache.get(k)); urlCache.delete(k); }
+    ids = [...new Set(ids || [])]; if (!ids.length) return;
+    await Store.apply(ids.flatMap((id) => [{ s: 'photos', del: id }, { s: 'thumbs', del: id }]));
+    ids.forEach(soltarURL);
+  }
+  // fotos em uso: nas fichas, nas fotos para organizar e na lixeira
+  function fotosEmUso(records, loose, trash) {
+    const usadas = new Set();
+    for (const r of records || []) for (const id of r.photoIds || []) usadas.add(id);
+    for (const l of loose || []) if (l.photoId) usadas.add(l.photoId);
+    for (const x of trash || []) {
+      if (x.rec) for (const id of x.rec.photoIds || []) usadas.add(id);
+      for (const l of x.loose || []) if (l.photoId) usadas.add(l.photoId);
+      if (x.photoId) usadas.add(x.photoId);
     }
+    return usadas;
+  }
+  // apaga de vez só as fotos da lista que não estão em uso em nenhum outro lugar
+  async function apagarFotosSemUso(ids) {
+    const usadas = fotosEmUso(S.records, S.loose, S.trash);
+    await deletePhotos((ids || []).filter((id) => !usadas.has(id)));
+  }
+  // Cada janela aberta do app segura uma "trava" compartilhada; ao abrir, o app vê se há outra janela aberta (no
+  // computador, duas abas). Se houver, não limpa fotos órfãs: a outra pode estar no meio de uma importação.
+  const TRAVA = 'app-aberto:' + DB_NAME;
+  let comTrava = false;
+  async function outraJanelaAberta() {
+    try {
+      if (!navigator.locks || !navigator.locks.query) return false;
+      const q = await navigator.locks.query();
+      return (q.held || []).filter((l) => l.name === TRAVA).length - (comTrava ? 1 : 0) > 0;
+    } catch (e) { return false; }
+  }
+  function segurarTrava() {
+    if (comTrava) return;
+    try { if (navigator.locks && navigator.locks.request) navigator.locks.request(TRAVA, { mode: 'shared' }, () => { comTrava = true; return new Promise(() => {}); }).catch(() => {}); } catch (e) { /* sem suporte */ }
+  }
+  // Fotos órfãs: gravadas, mas sem ficha, sem foto para organizar e fora da lixeira. Acontece quando o app fecha no meio
+  // de uma importação ou de uma ficha nova. Só roda ao abrir o app, quando nada está sendo editado, e relê tudo do banco.
+  async function limparOrfas() {
+    if (await outraJanelaAberta()) return 0;
+    const [records, loose, trash] = await Promise.all([Store.all('records'), Store.all('loose'), Store.all('trash')]);
+    const usadas = fotosEmUso(records, loose, trash);
+    const fotos = await Store.keys('photos'), minis = await Store.keys('thumbs');
+    const sobra = fotos.filter((id) => !usadas.has(id));
+    const minisSobra = minis.filter((id) => !usadas.has(id));
+    if (!sobra.length && !minisSobra.length) return 0;
+    await Store.apply([...sobra.map((id) => ({ s: 'photos', del: id })), ...minisSobra.map((id) => ({ s: 'thumbs', del: id }))]);
+    sobra.forEach(soltarURL);
+    return sobra.length;
   }
 
   // ================= regras =================
@@ -335,9 +437,12 @@
   }
 
   // ================= componentes =================
-  function toast(msg, ms) {
-    const t = $('#toast'); t.textContent = msg; t.hidden = false;
-    clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), ms || 3000);
+  // aviso rápido embaixo da tela; com acao ({ label, fn }) ganha um botão, como "Desfazer"
+  function toast(msg, ms, acao) {
+    const t = $('#toast');
+    t.replaceChildren(...[h('span', null, msg), acao ? h('button', { class: 'act', type: 'button', onclick: () => { t.hidden = true; clearTimeout(toast._t); acao.fn(); } }, acao.label) : null].filter(Boolean));
+    t.classList.toggle('com-acao', !!acao); t.hidden = false;
+    clearTimeout(toast._t); toast._t = setTimeout(() => (t.hidden = true), ms || (acao ? 7000 : 3000));
   }
   function confirmDialog(o) {
     return new Promise((res) => {
@@ -493,6 +598,7 @@
     const out = [];
     if (!PREVIEW && S.storage === 'memory') out.push(tip('Os dados não estão sendo salvos', ' Abra o app pelo ícone na tela de início.', null, null, 'alert', 'warn'));
     else if (!PREVIEW && !TESTE && !isStandalone() && !S.settings.installHidden) out.push(tip('Instale na tela de início', ' No Safari, toque em Compartilhar e depois em Adicionar à Tela de Início.', 'Ver como', () => sheetInstall(), 'phone'));
+    if (S.imports.some((x) => x.estado === 'andamento')) out.push(tip('A importação da conversa não terminou', ' O que já entrou está guardado. Escolha o arquivo da conversa de novo, e o app traz só o que faltou.', 'Continuar', () => sheetWhatsHelp(), 'alert', 'warn'));
     if (!S.records.length && !S.loose.length) { out.push(welcome()); return out; }
     const m = metrics();
     const strip = h('span', { class: 'strip' }, h('span', null, 'Recebido em ' + MES_LONGO[+today().slice(5, 7) - 1]), h('b', null, brl0(m.recMes)));
@@ -624,8 +730,11 @@
   async function bulk(kind) {
     const ids = [...S.sel]; const n = ids.length; if (!n) return;
     if (kind === 'excluir') {
-      if (!(await confirmDialog({ title: `Excluir ${plural(n, 'cirurgia', 'cirurgias')}?`, text: 'As fotos delas também saem do app. No WhatsApp, nada muda.', ok: 'Excluir', danger: true }))) return;
-      for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r) await deleteRecord(r); }
+      if (!(await confirmDialog({ title: `Excluir ${plural(n, 'cirurgia', 'cirurgias')}?`, text: `Elas ficam ${LIXEIRA_DIAS} dias na lixeira, em Ajustes, com as fotos. No WhatsApp, nada muda.`, ok: 'Excluir', danger: true }))) return;
+      const itens = await excluirCirurgias(ids.map((id) => S.records.find((x) => x.id === id)).filter(Boolean));
+      S.selecting = false; S.sel.clear(); derive(); render();
+      toast(n === 1 ? 'Cirurgia excluída.' : `${n} cirurgias excluídas.`, 0, desfazer(itens, n === 1 ? 'A cirurgia voltou.' : 'As cirurgias voltaram.'));
+      return;
     } else if (kind === 'recebido') {
       if (!(await confirmDialog({ title: `Marcar ${plural(n, 'cirurgia', 'cirurgias')} como recebidas?`, text: 'Bom para as que já foram pagas antes de você usar o app. O valor fica em branco e você pode completar depois.', ok: 'Marcar' }))) return;
       for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r && r.status !== 'recebido') { r.status = 'recebido'; r.recebido = { valor: null, data: today(), origem: 'manual' }; await saveRecord(r); } }
@@ -783,7 +892,9 @@
     out.push(sec('Organização', [
       rowBtn('photo', '', 'Fotos para organizar', plural(S.loose.length, 'foto', 'fotos'), () => sheetLoose()),
       rowBtn('tag', '', 'Nomes e abreviações', 'Colegas, hospitais, procedimentos e convênios', () => sheetTerms()),
-      rowBtn('folder', '', 'Planilhas de repasse', plural(S.repasses.length, 'importada', 'importadas'), () => sheetRepasses())]));
+      rowBtn('folder', '', 'Planilhas de repasse', plural(S.repasses.length, 'importada', 'importadas'), () => sheetRepasses()),
+      rowBtn('chat', '', 'Conversas do WhatsApp', plural(S.imports.length, 'importada', 'importadas'), () => sheetImports()),
+      rowBtn('trash', '', 'Lixeira', S.trash.length ? `${plural(S.trash.length, 'item', 'itens')} dos últimos ${LIXEIRA_DIAS} dias` : 'Vazia', () => sheetLixeira())]));
     out.push(sec('Preferências', [
       rowBtn('user', 'plain', 'Seu nome', S.settings.nome || 'Para o app te cumprimentar', async () => { const v = await formDialog({ title: 'Seu nome', fields: [{ id: 'n', label: 'Como você quer ser chamada', value: S.settings.nome }] }); if (v) { S.settings.nome = v.n.trim(); await saveSettings(); render(); } }),
       rowBtn('clock', 'danger', 'Aviso de atraso', `Depois de ${S.settings.alertDias} dias sem pagamento`, async () => {
@@ -848,7 +959,11 @@
         try { let i = 0; for (const f of files) { const id = await storePhoto(f, f.name); x.photoIds.push(id); if (editing) { added.push(id); dirty = true; } b.set(++i / files.length); } } finally { b.done(); }
         if (!editing) await persist(); else api.update();
       }) }, icon('camera'), 'Adicionar foto');
-      return h('div', { class: 'carousel', 'aria-label': 'Fotos' }, x.photoIds.map((id, i) => h('button', { class: 'ph', type: 'button', 'aria-label': `Ver foto ${i + 1}`, onclick: () => openViewer(x.photoIds, i, editing ? null : async (rid) => { d.photoIds = d.photoIds.filter((y) => y !== rid); await deletePhotos([rid]); await persist(); toast('Foto tirada da cirurgia.'); }) }, photoImg(id, true))), addTile);
+      return h('div', { class: 'carousel', 'aria-label': 'Fotos' }, x.photoIds.map((id, i) => h('button', { class: 'ph', type: 'button', 'aria-label': `Ver foto ${i + 1}`, onclick: () => openViewer(x.photoIds, i, editing ? null : async (rid) => {
+        const { x: item, r } = await tirarFoto(S.records.find((y) => y.id === d.id) || d, rid); d = clone(r);
+        derive(); render(); api.update();
+        toast('Foto tirada da cirurgia.', 0, { label: 'Desfazer', fn: async () => { await recuperar([item]); const nr = S.records.find((y) => y.id === d.id); if (nr) d = clone(nr); derive(); render(); api.update(); toast('A foto voltou.'); } });
+      }) }, photoImg(id, true))), addTile);
     }
     function renderView() {
       const kids = [photosRow(d, false)];
@@ -867,8 +982,9 @@
       kids.push(h('div', { class: 'group' },
         h('button', { class: 'rowbtn', type: 'button', onclick: () => mergeInto(d, api) }, h('span', { class: 'bubble plain' }, icon('merge')), h('span', { class: 't' }, 'Juntar com outra ficha', h('small', null, 'Quando a mesma cirurgia aparece duas vezes')), icon('chev', 'chev')),
         h('button', { class: 'rowbtn danger', type: 'button', onclick: async () => {
-          if (!(await confirmDialog({ title: 'Excluir esta cirurgia?', text: 'As fotos dela também saem do app. No WhatsApp, nada muda.', ok: 'Excluir', danger: true }))) return;
-          await deleteRecord(S.records.find((x) => x.id === d.id) || d); derive(); render(); api.close(true); toast('Cirurgia excluída.');
+          if (!(await confirmDialog({ title: 'Excluir esta cirurgia?', text: `Ela fica ${LIXEIRA_DIAS} dias na lixeira, em Ajustes, com as fotos. No WhatsApp, nada muda.`, ok: 'Excluir', danger: true }))) return;
+          const itens = await excluirCirurgias([S.records.find((x) => x.id === d.id) || d]); derive(); render(); api.close(true);
+          toast('Cirurgia excluída.', 0, desfazer(itens, 'A cirurgia voltou.'));
         } }, h('span', { class: 'bubble danger' }, icon('trash')), h('span', { class: 't' }, 'Excluir cirurgia'))));
       if (d.num) kids.push(h('p', { class: 'note', style: 'text-align:center' }, `Registro nº ${d.num}`));
       return { body: kids };
@@ -960,10 +1076,100 @@
     if (!out) return null;
     return { valor: parseMoney(out.v), data: out.d || today() };
   }
-  async function deleteRecord(r) {
-    await deletePhotos(r.photoIds);
-    if (r.key) { S.ignored.add(r.key); await Store.put('ignored', { key: r.key }); }
-    S.records = S.records.filter((x) => x.id !== r.id); await Store.del('records', r.id);
+  // ================= lixeira =================
+  // Excluir manda para a lixeira por 30 dias: a ficha (ou a foto) sai das listas, mas as fotos continuam guardadas.
+  // A mensagem do WhatsApp passa a ser ignorada nas importações; recuperar tira esse bloqueio. Depois de 30 dias,
+  // o item sai de vez (as fotos saem na limpeza ao abrir o app), e a mensagem continua ignorada, com como trazer de volta.
+  const LIXEIRA_DIAS = 30, DIA_MS = 86400000;
+  // motivo: excluida (cirurgia excluída), apagada (foto solta apagada), organizada (foto solta que virou ou entrou numa
+  // cirurgia), juntada (ficha juntada a outra). fotos: as fotos da mensagem, para saber se elas ainda estão no app.
+  const ignorar = (key, motivo, fotos) => (key ? { s: 'ignored', put: { key, motivo, em: Date.now(), fotos: fotos || [] } } : null);
+  function espelharIgnoradas(ops) {
+    for (const o of ops) if (o && o.s === 'ignored') {
+      if ('del' in o) { S.ignored.delete(o.del); S.ignoredInfo.delete(o.del); } else { S.ignored.add(o.put.key); S.ignoredInfo.set(o.put.key, o.put); }
+    }
+  }
+  async function excluirCirurgias(recs) {
+    const em = Date.now(); const ops = []; const itens = [];
+    for (const r of recs) {
+      const x = { id: C.uid('x'), tipo: 'cirurgia', em, rec: r };
+      itens.push(x); ops.push({ s: 'trash', put: x }, { s: 'records', del: r.id }, ignorar(r.key, 'excluida', r.photoIds));
+    }
+    await Store.apply(ops); espelharIgnoradas(ops);
+    const ids = new Set(recs.map((r) => r.id));
+    S.records = S.records.filter((r) => !ids.has(r.id)); S.trash.push(...itens);
+    return itens;
+  }
+  async function tirarFoto(rec, photoId) {
+    const r = { ...rec, photoIds: (rec.photoIds || []).filter((id) => id !== photoId), updatedAt: Date.now(), editadaEm: Date.now() };
+    const x = { id: C.uid('x'), tipo: 'foto', em: Date.now(), recId: rec.id, photoId, pos: (rec.photoIds || []).indexOf(photoId), data: rec.date };
+    await Store.apply([{ s: 'trash', put: x }, { s: 'records', put: r }]);
+    const i = S.records.findIndex((y) => y.id === r.id); if (i >= 0) S.records[i] = r;
+    S.trash.push(x);
+    return { x, r };
+  }
+  async function apagarSoltas(ls) {
+    const x = { id: C.uid('x'), tipo: 'fotos', em: Date.now(), loose: ls };
+    const ops = [{ s: 'trash', put: x }, ...ls.flatMap((l) => [{ s: 'loose', del: l.id }, ignorar(l.key, 'apagada', [l.photoId])])];
+    await Store.apply(ops); espelharIgnoradas(ops);
+    const ids = new Set(ls.map((l) => l.id)); S.loose = S.loose.filter((l) => !ids.has(l.id)); S.trash.push(x);
+    return x;
+  }
+  // devolve o que estava na lixeira; retorna quantos itens voltaram
+  async function recuperar(itens) {
+    const naLixeira = new Set(S.trash.map((x) => x.id));
+    const ordem = { cirurgia: 0, fotos: 1, foto: 2 };
+    itens = itens.filter((x) => naLixeira.has(x.id)).sort((a, b) => ordem[a.tipo] - ordem[b.tipo]);
+    const ops = [], voltaRec = [], voltaLoose = [], muda = new Map(); let n = 0;
+    for (const x of itens) {
+      ops.push({ s: 'trash', del: x.id });
+      if (x.tipo === 'cirurgia') {
+        // se a mesma mensagem já voltou por uma importação, não cria outra ficha igual
+        if (x.rec.key && S.records.some((r) => r.key === x.rec.key)) continue;
+        voltaRec.push(x.rec); ops.push({ s: 'records', put: x.rec }, x.rec.key ? { s: 'ignored', del: x.rec.key } : null); n++;
+      } else if (x.tipo === 'fotos') {
+        for (const l of x.loose) { voltaLoose.push(l); ops.push({ s: 'loose', put: l }, l.key ? { s: 'ignored', del: l.key } : null); }
+        n++;
+      } else if (x.tipo === 'foto') {
+        const volta = voltaRec.find((r) => r.id === x.recId);
+        const r = volta || muda.get(x.recId) || S.records.find((y) => y.id === x.recId);
+        if (r) {
+          const ids = r.photoIds || [];
+          const novo = ids.includes(x.photoId) ? ids : [...ids.slice(0, Math.max(0, x.pos)), x.photoId, ...ids.slice(Math.max(0, x.pos))];
+          if (volta) volta.photoIds = novo; else muda.set(r.id, { ...r, photoIds: novo, updatedAt: Date.now() });
+        } else {   // a cirurgia dela não existe mais: a foto volta para Fotos para organizar
+          const l = { id: C.uid('l'), key: null, date: x.data || today(), time: '', photoId: x.photoId };
+          voltaLoose.push(l); ops.push({ s: 'loose', put: l });
+        }
+        n++;
+      }
+    }
+    for (const r of muda.values()) ops.push({ s: 'records', put: r });
+    await Store.apply(ops); espelharIgnoradas(ops);
+    const saiu = new Set(itens.map((x) => x.id));
+    S.trash = S.trash.filter((x) => !saiu.has(x.id));
+    S.records.push(...voltaRec);
+    for (const r of muda.values()) { const i = S.records.findIndex((y) => y.id === r.id); if (i >= 0) S.records[i] = r; }
+    S.loose.push(...voltaLoose);
+    return n;
+  }
+  // o botão "Desfazer" dos avisos
+  const desfazer = (itens, msg) => ({ label: 'Desfazer', fn: async () => { const n = await recuperar(itens); derive(); render(); toast(n ? msg : 'Já tinha voltado.'); } });
+  // itens com mais de 30 dias saem de vez (as fotos que ficarem sem uso saem logo depois, em limparOrfas)
+  async function esvaziarLixeiraAntiga() {
+    const limite = Date.now() - LIXEIRA_DIAS * DIA_MS;
+    const velhos = S.trash.filter((x) => (x.em || 0) < limite);
+    if (!velhos.length) return;
+    await Store.apply(velhos.map((x) => ({ s: 'trash', del: x.id })));
+    const ids = new Set(velhos.map((x) => x.id)); S.trash = S.trash.filter((x) => !ids.has(x.id));
+  }
+  // sem lixeira: ao desfazer uma importação ou uma planilha (trazer de novo recria as fichas)
+  async function apagarFichasDeVez(recs) {
+    if (!recs.length) return;
+    const ids = new Set(recs.map((r) => r.id));
+    await Store.apply(recs.map((r) => ({ s: 'records', del: r.id })));
+    S.records = S.records.filter((r) => !ids.has(r.id));
+    await apagarFotosSemUso(recs.flatMap((r) => r.photoIds || []));
   }
   function mergeInto(d, parentApi) {
     sheetPick('Juntar com qual ficha?', S.records.filter((r) => r.id !== d.id), async (target) => {
@@ -976,9 +1182,11 @@
       if (d.caption) t.caption = t.caption ? t.caption + '\n' + d.caption : d.caption;
       if (d.notas) t.notas = t.notas ? t.notas + '\n' + d.notas : d.notas;
       if (t.status !== 'recebido' && d.status === 'recebido') { t.status = 'recebido'; t.recebido = d.recebido; t.rep = d.rep; }
-      await saveRecord(t);
-      if (d.key) { S.ignored.add(d.key); await Store.put('ignored', { key: d.key }); }
-      S.records = S.records.filter((x) => x.id !== d.id); await Store.del('records', d.id);
+      t.updatedAt = t.editadaEm = Date.now();
+      // numa operação só: a ficha de destino guarda tudo, esta sai, e a mensagem dela passa a ser ignorada
+      const ops = [{ s: 'records', put: t }, { s: 'records', del: d.id }, ignorar(d.key, 'juntada', d.photoIds)];
+      await Store.apply(ops); espelharIgnoradas(ops);
+      S.records = S.records.filter((x) => x.id !== d.id);
       derive(); render(); parentApi.close(true); toast('Fichas juntadas.');
       return true;
     });
@@ -1010,7 +1218,7 @@
     const wrap = h('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Foto' },
       h('div', { class: 'viewer-top' }, h('button', { class: 'vbtn', type: 'button', 'aria-label': 'Fechar', onclick: close }, icon('x')), count,
         onRemove ? h('button', { class: 'vbtn', type: 'button', 'aria-label': 'Tirar esta foto da cirurgia', onclick: async () => {
-          if (!(await confirmDialog({ title: 'Tirar esta foto da cirurgia?', text: 'Ela sai do app. No WhatsApp continua.', ok: 'Tirar', danger: true }))) return;
+          if (!(await confirmDialog({ title: 'Tirar esta foto da cirurgia?', text: `Ela fica ${LIXEIRA_DIAS} dias na lixeira, em Ajustes. No WhatsApp continua.`, ok: 'Tirar', danger: true }))) return;
           const id = ids[i]; close(); onRemove(id);
         } }, icon('trash')) : h('span', { style: 'width:46px' })),
       box,
@@ -1086,29 +1294,72 @@
       const foot = [
         h('button', { class: 'btn primary', type: 'button', style: 'flex:1.7', disabled: !sel.size, onclick: () => {
           const ls = chosen(); const first = ls[0];
-          sheetRecord(newRecord({ date: first.date, time: null, photoIds: ls.map((l) => l.photoId), revisar: [] }), { dirty: true, onSaved: async () => { await removeLoose(ls, false); sel.clear(); api.update(); } });
+          sheetRecord(newRecord({ date: first.date, time: null, photoIds: ls.map((l) => l.photoId), revisar: [] }), { dirty: true, onSaved: async () => { await removeLoose(ls); sel.clear(); api.update(); } });
         } }, 'Criar cirurgia'),
         h('button', { class: 'btn', type: 'button', disabled: !sel.size, onclick: () => {
           const ls = chosen();
-          sheetPick('Juntar a qual cirurgia?', S.records, async (t) => { const r = S.records.find((x) => x.id === t.id); r.photoIds.push(...ls.map((l) => l.photoId)); await saveRecord(r); await removeLoose(ls, false); sel.clear(); derive(); render(); api.update(); toast('Fotos juntadas à cirurgia.'); });
+          sheetPick('Juntar a qual cirurgia?', S.records, async (t) => { const r = S.records.find((x) => x.id === t.id); r.photoIds.push(...ls.map((l) => l.photoId)); await saveRecord(r); await removeLoose(ls); sel.clear(); derive(); render(); api.update(); toast('Fotos juntadas à cirurgia.'); });
         } }, 'Juntar'),
         h('button', { class: 'btn', type: 'button', style: 'flex:0 0 56px', disabled: !sel.size, 'aria-label': 'Apagar as fotos escolhidas', onclick: async () => {
           const ls = chosen();
-          if (!(await confirmDialog({ title: `Apagar ${plural(ls.length, 'foto', 'fotos')}?`, text: 'Saem do app e não voltam na próxima importação. No WhatsApp continuam.', ok: 'Apagar', danger: true }))) return;
-          await removeLoose(ls, true); sel.clear(); render(); api.update();
+          if (!(await confirmDialog({ title: `Apagar ${plural(ls.length, 'foto', 'fotos')}?`, text: `${ls.length === 1 ? 'Ela fica' : 'Elas ficam'} ${LIXEIRA_DIAS} dias na lixeira, em Ajustes. No WhatsApp continuam.`, ok: 'Apagar', danger: true }))) return;
+          const item = await apagarSoltas(ls); sel.clear(); render(); api.update();
+          toast(ls.length === 1 ? 'Foto apagada.' : `${ls.length} fotos apagadas.`, 0, { label: 'Desfazer', fn: async () => { await recuperar([item]); render(); api.update(); toast(ls.length === 1 ? 'A foto voltou.' : 'As fotos voltaram.'); } });
         } }, icon('trash', 'sm'))];
       return { body, foot };
     } });
     return api;
   }
-  async function removeLoose(ls, deletePhoto) {
-    for (const l of ls) {
-      if (deletePhoto) await deletePhotos([l.photoId]);
-      S.ignored.add(l.key); await Store.put('ignored', { key: l.key });
-      await Store.del('loose', l.id);
-    }
+  // fotos que viraram uma cirurgia ou entraram numa: saem de Fotos para organizar e não voltam na próxima importação
+  async function removeLoose(ls) {
+    const ops = ls.flatMap((l) => [{ s: 'loose', del: l.id }, ignorar(l.key, 'organizada', [l.photoId])]);
+    await Store.apply(ops); espelharIgnoradas(ops);
     const ids = new Set(ls.map((l) => l.id)); S.loose = S.loose.filter((l) => !ids.has(l.id));
     render();
+  }
+
+  // ================= lixeira (tela) =================
+  const diasRestantes = (x) => Math.max(1, LIXEIRA_DIAS - Math.floor((Date.now() - (x.em || 0)) / DIA_MS));
+  // mensagens que o app ignora e que valem mostrar: as excluídas ou apagadas que já não estão na lixeira, e as fotos
+  // organizadas ou fichas juntadas cujas fotos já não estão em lugar nenhum do app
+  function ignoradasParaMostrar() {
+    const naLixeira = new Set();
+    for (const x of S.trash) { if (x.rec && x.rec.key) naLixeira.add(x.rec.key); for (const l of x.loose || []) if (l.key) naLixeira.add(l.key); }
+    const usadas = fotosEmUso(S.records, S.loose, S.trash);
+    return [...S.ignoredInfo.values()].filter((g) => {
+      if (naLixeira.has(g.key)) return false;
+      if (g.motivo === 'organizada' || g.motivo === 'juntada') return (g.fotos || []).length > 0 && !g.fotos.some((id) => usadas.has(id));
+      return true;
+    }).map((g) => ({ ...g, d: C.describeKey(g.key) })).filter((g) => g.d).sort((a, b) => (b.d.date + b.d.time).localeCompare(a.d.date + a.d.time));
+  }
+  const miniFoto = (id) => h('span', { class: 'lx-ph', 'aria-hidden': 'true' }, id ? photoImg(id, true) : icon('photo'));
+  function sheetLixeira() {
+    return openSheet({ title: 'Lixeira', back: true, render(api) {
+      const itens = [...S.trash].sort((a, b) => (b.em || 0) - (a.em || 0));
+      const ign = ignoradasParaMostrar();
+      const voltar = (x) => h('button', { class: 'btn sm', type: 'button', onclick: async () => {
+        const n = await recuperar([x]); derive(); render(); api.update();
+        toast(!n ? 'Ela já tinha voltado pela conversa do WhatsApp.' : x.tipo === 'cirurgia' ? 'A cirurgia voltou.' : x.tipo === 'fotos' ? 'As fotos voltaram para Fotos para organizar.' : 'A foto voltou.');
+      } }, 'Recuperar');
+      const quando = (x, txt) => `${txt} em ${ddmmyyyy(C.todayStr(new Date(x.em)))}. Sai da lixeira em ${plural(diasRestantes(x), 'dia', 'dias')}.`;
+      const linha = (x) => {
+        if (x.tipo === 'cirurgia') return h('div', { class: 'ritem lx' }, dateBadge(x.rec), h('span', { class: 'rmain' }, h('span', { class: 'p' }, procText(x.rec)), h('span', { class: 'm' }, quando(x, 'Excluída'))), h('span', { class: 'rside' }, voltar(x)));
+        if (x.tipo === 'fotos') return h('div', { class: 'ritem lx' }, miniFoto(x.loose[0] && x.loose[0].photoId), h('span', { class: 'rmain' }, h('span', { class: 'p' }, plural(x.loose.length, 'foto sem legenda', 'fotos sem legenda')), h('span', { class: 'm' }, quando(x, x.loose.length === 1 ? 'Apagada' : 'Apagadas'))), h('span', { class: 'rside' }, voltar(x)));
+        const r = S.records.find((y) => y.id === x.recId);
+        return h('div', { class: 'ritem lx' }, miniFoto(x.photoId), h('span', { class: 'rmain' }, h('span', { class: 'p' }, 'Foto de uma cirurgia'), h('span', { class: 'm' }, (r ? `${procText(r)}, de ${ddmmyyyy(r.date)}. ` : '') + quando(x, 'Tirada da cirurgia'))), h('span', { class: 'rside' }, voltar(x)));
+      };
+      const body = [h('p', { class: 'lead' }, `O que você exclui fica aqui por ${LIXEIRA_DIAS} dias, com as fotos. Depois sai de vez.`)];
+      body.push(itens.length ? h('div', { class: 'group' }, itens.map(linha)) : h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('trash')), h('p', null, 'A lixeira está vazia.')));
+      if (ign.length) body.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, 'Mensagens que o app ignora')),
+        h('p', { class: 'note' }, 'O app não traz de novo da conversa o que você excluiu ou apagou. Toque em Trazer de volta, e a mensagem volta na próxima vez que você trouxer a conversa do WhatsApp.'),
+        h('div', { class: 'group' }, ign.map((g) => h('div', { class: 'ritem lx' }, dateBadge({ date: g.d.date }),
+          h('span', { class: 'rmain' }, h('span', { class: 'p' }, g.d.texto ? cap(g.d.texto) : 'Foto sem legenda'), h('span', { class: 'm' }, `Enviada às ${horaTxt(g.d.time)}${g.d.texto && g.d.arquivos ? `, com ${plural(g.d.arquivos, 'foto', 'fotos')}` : ''}`)),
+          h('span', { class: 'rside' }, h('button', { class: 'btn sm', type: 'button', onclick: async () => {
+            await Store.del('ignored', g.key); S.ignored.delete(g.key); S.ignoredInfo.delete(g.key); api.update();
+            toast('Pronto. Ela volta na próxima vez que você trouxer a conversa.', 4500);
+          } }, 'Trazer de volta')))))));
+      return { body };
+    } });
   }
 
   // ================= nomes e abreviações =================
@@ -1185,11 +1436,13 @@
   }
   async function undoRepasse(doc, ask) {
     if (ask && !(await confirmDialog({ title: 'Desfazer esta planilha?', text: 'As cirurgias que ela marcou como pagas voltam para a receber, e as que ela criou são apagadas.', ok: 'Desfazer', danger: true }))) return false;
+    const criadas = [];
     for (const r of [...S.records]) {
       if (!(r.recebido && r.recebido.repId === doc.id)) continue;
-      if (r.origem === 'repasse') await deleteRecord(r);
-      else { r.status = 'aberto'; r.recebido = null; r.rep = []; await saveRecord(r); }
+      if (r.origem === 'repasse') criadas.push(r);
+      else { r.status = 'aberto'; r.recebido = null; r.rep = []; await saveRecord(r, { sistema: true }); }
     }
+    await apagarFichasDeVez(criadas);
     S.repasses = S.repasses.filter((x) => x.id !== doc.id); await Store.del('repasses', doc.id);
     derive(); render(); if (ask) toast('Planilha desfeita.');
     return true;
@@ -1261,11 +1514,18 @@
     if (!S.settings.nome && me && !PREVIEW) S.settings.nome = C.capFirst(me[0].split(/\s+/)[0]);
     if (chat.chatName && (!me || chat.chatName !== me[0])) S.settings.grupo = chat.chatName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').trim();
     const byKey = () => new Map(S.records.filter((r) => r.key).map((r) => [r.key, r]));
+    // o que é novo nesta conversa. Fotos sem legenda vão uma a uma: cada foto tem a sua chave (com "~n" quando a mesma
+    // mensagem traz mais de uma), e a que já está no app, na lixeira ou foi ignorada não entra de novo.
     const plan = () => {
       const ex = byKey(); const lk = new Set(S.loose.map((l) => l.key));
+      for (const x of S.trash) for (const l of x.loose || []) if (l.key) lk.add(l.key);
       const entries = g.entries.filter((e) => !ex.has(e.key) && !S.ignored.has(e.key));
       const fill = zip ? g.entries.filter((e) => ex.has(e.key) && !ex.get(e.key).photoIds.length && e.photos.length) : [];
-      const loose = zip ? g.loose.filter((l) => l.photos.length && !lk.has(l.key) && !S.ignored.has(l.key)) : [];
+      const loose = [];
+      if (zip) for (const l of g.loose) {
+        if (S.ignored.has(l.key)) continue;
+        l.photos.forEach((name, i) => { const key = l.photos.length > 1 ? `${l.key}~${i}` : l.key; if (!lk.has(key) && !S.ignored.has(key)) loose.push({ key, date: l.date, time: l.time, name }); });
+      }
       return { entries, fill, loose, ex };
     };
     let p = plan();
@@ -1273,7 +1533,10 @@
     const choice = new Map(unknown.map((u) => [u.norm, u.guess]));
     const st = { step: unknown.length ? 'termos' : 'resumo', done: null };
     let recs = [];
-    const api = openSheet({ title: 'Conversa do WhatsApp', render(api) {
+    const api = openSheet({ title: 'Conversa do WhatsApp',
+      // enquanto guarda as fotos, a tela fica aberta: se fechar no meio, a importação continua da próxima vez
+      beforeClose: async () => { if (st.step !== 'importando') return true; toast('Espere terminar de guardar as fotos.'); return false; },
+      render(api) {
       if (st.step === 'termos') {
         return { body: [
           h('h1', { class: 'bigtitle' }, 'Quem é quem?'),
@@ -1288,10 +1551,15 @@
       if (st.step === 'resumo') {
         recs = p.entries.map((e) => C.recordFromEntry(e, S.index, { chatName: chat.chatName }));
         const nPh = recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0);
-        const nLoose = p.loose.reduce((s, l) => s + l.photos.length, 0);
+        const nLoose = p.loose.length;
         const rev = recs.filter((r) => pendencias(r).length).length;
         const dates = recs.map((r) => r.date).sort();
-        if (!recs.length && !nLoose && !p.fill.length) return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Nada de novo'), h('p', null, 'Tudo o que está nessa conversa já está no app.'))], foot: h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Fechar') };
+        if (!recs.length && !nLoose && !p.fill.length) {
+          // uma importação que tinha parado no meio e não tem mais nada a trazer está, na prática, terminada
+          const parada = S.imports.find((x) => x.estado === 'andamento');
+          if (parada) { parada.estado = 'pronta'; parada.fim = Date.now(); Store.put('imports', parada).then(() => render()).catch(() => {}); }
+          return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Nada de novo'), h('p', null, 'Tudo o que está nessa conversa já está no app.'))], foot: h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Fechar') };
+        }
         return { body: [
           h('div', null, h('h1', { class: 'bigtitle' }, recs.length ? plural(recs.length, 'cirurgia encontrada', 'cirurgias encontradas') : 'Fotos novas'),
             dates.length ? h('p', { class: 'muted', style: 'margin-top:6px' }, `De ${dataLonga(dates[0], { semDia: true, ano: true })} a ${dataLonga(dates[dates.length - 1], { semDia: true, ano: true })}`) : null),
@@ -1305,31 +1573,102 @@
       const dn = st.done;
       const extras = [dn.loose ? plural(dn.loose, 'foto para organizar', 'fotos para organizar') : null, dn.rev ? plural(dn.rev, 'para completar', 'para completar') : null, dn.fill ? `fotos em ${plural(dn.fill, 'cirurgia', 'cirurgias')} que já estavam no app` : null, dn.err ? `${dn.err} fotos não puderam ser lidas` : null].filter(Boolean);
       return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${plural(dn.recs, 'cirurgia nova', 'cirurgias novas')} no app.`), extras.length ? h('p', null, cap(extras.join(', ')) + '.') : null),
-        !PREVIEW && (dn.recs || dn.loose) ? tip('Faça um backup agora', ' Depois do backup, o arquivo da conversa que você salvou em Arquivos já pode ser apagado do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null],
+        !PREVIEW && (dn.recs || dn.loose) ? tip('Faça um backup agora', ' Depois do backup, o arquivo da conversa que você salvou em Arquivos já pode ser apagado do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null,
+        h('button', { class: 'link', type: 'button', 'data-act': 'desfazer-importacao', onclick: async () => { const imp = S.imports.find((x) => x.id === dn.impId); if (imp && (await desfazerImportacao(imp, true))) { api.close(true); go('inicio'); toast('Importação desfeita.'); } } }, 'Desfazer esta importação')],
         foot: [dn.loose ? h('button', { class: 'btn', type: 'button', onclick: () => { api.close(true); sheetLoose(); } }, 'Organizar fotos') : null, h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', {}); } }, 'Ver cirurgias')] };
     } });
+    // Grava aos poucos: cada cirurgia entra com as suas fotos e o seu número assim que fica pronta, e cada foto sem legenda
+    // entra logo depois de guardada. Se o app fechar no meio, o que já entrou fica, a importação aparece como "não terminou"
+    // e, ao escolher o arquivo de novo, o app traz só o que faltou. Fotos guardadas sem ficha saem na próxima abertura.
     async function runImport(api) {
       st.step = 'importando'; api.update();
       const lab = () => $('#imp-lab'), bar = () => $('#imp-bar');
       const entryOf = new Map(zip ? zip.entries.map((e) => [e.base, e]) : []);
-      const total = Math.max(1, recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0) + p.loose.reduce((s, l) => s + l.photos.length, 0));
+      const total = Math.max(1, recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0) + p.loose.length);
       let n = 0, err = 0;
       const one = async (name) => {
         n++; if (lab()) lab().textContent = `Guardando foto ${n} de ${total}`; if (bar()) bar().style.width = Math.round((n / total) * 100) + '%';
         const e = entryOf.get(name); if (!e) return null;
-        try { return await storePhoto(await C.zipEntryBlob(zip, e, extType(name)), name); } catch (x) { err++; return null; }
+        try { return await storePhoto(await C.zipEntryBlob(zip, e, extType(name)), name); } catch (x) { err++; anotaErro(x && x.message, 'guardar foto'); return null; }
       };
-      for (const r of recs) { for (const nm of r.photoNames) { const id = zip ? await one(nm) : null; if (id) r.photoIds.push(id); } S.settings.seq += 1; r.num = S.settings.seq; }
-      const filled = [];
-      for (const e of p.fill) { const r = p.ex.get(e.key); for (const nm of e.photos) { const id = await one(nm); if (id) r.photoIds.push(id); } filled.push(r); }
-      const looseItems = [];
-      for (const l of p.loose) for (let i = 0; i < l.photos.length; i++) { const id = await one(l.photos[i]); if (id) looseItems.push({ id: C.uid('l'), key: l.photos.length > 1 ? `${l.key}~${i}` : l.key, date: l.date, time: l.time, photoId: id }); }
-      await Store.putMany('records', [...recs, ...filled]); S.records.push(...recs);
-      await Store.putMany('loose', looseItems); S.loose.push(...looseItems);
+      // a importação que parou no meio continua com o mesmo número: desfazer depois tira tudo de uma vez
+      let imp = S.imports.find((x) => x.estado === 'andamento');
+      if (!imp) { imp = { id: C.uid('i'), inicio: Date.now(), arquivo: (file && file.name) || '', grupo: S.settings.grupo || '', fill: [] }; S.imports.push(imp); }
+      imp.estado = 'andamento'; imp.fim = null; imp.fill = imp.fill || [];
+      await Store.put('imports', imp);
+      let feitas = 0, fotosSoltas = 0; const filled = [];
+      for (const r of recs) {
+        for (const nm of r.photoNames) { const id = zip ? await one(nm) : null; if (id) r.photoIds.push(id); }
+        S.settings.seq += 1; r.num = S.settings.seq; r.importId = imp.id; r.createdAt = r.updatedAt = Date.now();
+        await Store.apply([{ s: 'records', put: r }, { s: 'meta', put: S.settings }]);   // a ficha entra junto com o número dela
+        S.records.push(r); feitas++;
+      }
+      for (const e of p.fill) {
+        const r = p.ex.get(e.key); const novas = [];
+        for (const nm of e.photos) { const id = await one(nm); if (id) novas.push(id); }
+        if (!novas.length) continue;
+        r.photoIds.push(...novas); imp.fill.push({ recId: r.id, photoIds: novas });
+        await Store.apply([{ s: 'records', put: r }, { s: 'imports', put: imp }]);
+        filled.push(r);
+      }
+      for (const l of p.loose) {
+        const id = await one(l.name); if (!id) continue;
+        const item = { id: C.uid('l'), key: l.key, date: l.date, time: l.time, photoId: id, importId: imp.id };
+        await Store.put('loose', item); S.loose.push(item); fotosSoltas++;
+      }
+      imp.estado = 'pronta'; imp.fim = Date.now();
+      await Store.put('imports', imp);
       await saveSettings(); persistStorage(); derive(); render();
-      st.done = { recs: recs.length, loose: looseItems.length, rev: recs.filter((r) => pendencias(r).length).length, fill: filled.length, err };
+      st.done = { recs: feitas, loose: fotosSoltas, rev: recs.filter((r) => pendencias(r).length).length, fill: filled.length, err, impId: imp.id };
       st.step = 'pronto'; api.update();
     }
+  }
+
+  // ================= conversas importadas =================
+  // Cada importação do WhatsApp tem um número: as fichas e as fotos sem legenda que ela trouxe levam esse número, e as
+  // fotos que ela pôs em fichas que já existiam ficam anotadas nela. Desfazer tira tudo isso de uma vez (sem lixeira:
+  // trazer a conversa de novo traz tudo de volta).
+  function resumoImportacao(x) {
+    const recs = S.records.filter((r) => r.importId === x.id);
+    const loose = S.loose.filter((l) => l.importId === x.id);
+    const fill = (x.fill || []).map((f) => { const r = S.records.find((y) => y.id === f.recId && y.importId !== x.id); return r ? { r, ids: f.photoIds.filter((id) => (r.photoIds || []).includes(id)) } : null; }).filter((f) => f && f.ids.length);
+    const fotos = recs.reduce((s, r) => s + (r.photoIds || []).length, 0) + loose.length + fill.reduce((s, f) => s + f.ids.length, 0);
+    const mexidas = recs.filter((r) => r.status !== 'aberto' || r.editadaEm).length;
+    return { recs, loose, fill, fotos, mexidas };
+  }
+  async function desfazerImportacao(x, perguntar) {
+    const z = resumoImportacao(x);
+    if (perguntar) {
+      const mex = z.mexidas ? (z.mexidas === 1 ? ' Uma delas já tinha mudanças suas, como um pagamento, que também saem.' : ` ${z.mexidas} delas já tinham mudanças suas, como pagamentos, que também saem.`) : '';
+      const ok = await confirmDialog({ title: 'Desfazer esta importação?', text: `Saem do app ${plural(z.recs.length, 'cirurgia', 'cirurgias')} e ${plural(z.fotos, 'foto', 'fotos')} que ela trouxe.${mex} Se você trouxer a conversa de novo, elas voltam.`, ok: 'Desfazer', danger: true });
+      if (!ok) return false;
+    }
+    const fotos = [...z.recs.flatMap((r) => r.photoIds || []), ...z.loose.map((l) => l.photoId)];
+    const ops = [...z.recs.map((r) => ({ s: 'records', del: r.id })), ...z.loose.map((l) => ({ s: 'loose', del: l.id })), { s: 'imports', del: x.id }];
+    const mudadas = z.fill.map((f) => { const tira = new Set(f.ids); fotos.push(...f.ids); return { ...f.r, photoIds: f.r.photoIds.filter((id) => !tira.has(id)), updatedAt: Date.now() }; });
+    for (const r of mudadas) ops.push({ s: 'records', put: r });
+    await Store.apply(ops);
+    const saiRec = new Set(z.recs.map((r) => r.id)), saiLoose = new Set(z.loose.map((l) => l.id));
+    S.records = S.records.filter((r) => !saiRec.has(r.id)).map((r) => mudadas.find((m) => m.id === r.id) || r);
+    S.loose = S.loose.filter((l) => !saiLoose.has(l.id));
+    S.imports = S.imports.filter((y) => y.id !== x.id);
+    await apagarFotosSemUso(fotos);   // só as que não ficaram em outra ficha (por exemplo, juntada)
+    derive(); render();
+    return true;
+  }
+  function sheetImports() {
+    return openSheet({ title: 'Conversas do WhatsApp', back: true, render(api) {
+      if (!S.imports.length) return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('chat')), h('p', null, 'As conversas que você trouxer do WhatsApp aparecem aqui, e dá para desfazer cada uma.'))] };
+      const lista = [...S.imports].sort((a, b) => (b.inicio || 0) - (a.inicio || 0));
+      return { body: [h('p', { class: 'lead' }, 'Cada vez que você traz a conversa, o app guarda o que ela trouxe. Desfazer tira essas cirurgias e fotos de uma vez.'),
+        h('div', { class: 'group' }, lista.map((x) => { const z = resumoImportacao(x);
+          const sub = x.estado === 'andamento' ? 'Não terminou. Escolha o arquivo da conversa de novo para continuar.'
+            : z.recs.length || z.fotos ? `${plural(z.recs.length, 'cirurgia', 'cirurgias')} e ${plural(z.fotos, 'foto', 'fotos')}` : 'Nada dela continua no app.';
+          return h('div', { class: 'rowbtn' }, h('span', { class: 'bubble ok' }, icon('chat')),
+            h('span', { class: 't' }, `Trazida em ${ddmmyyyy(C.todayStr(new Date(x.inicio)))}`, h('small', null, sub)),
+            h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (await desfazerImportacao(x, true)) { api.update(); toast('Importação desfeita.'); } } }, 'Desfazer'));
+        }))] };
+    } });
   }
 
   // ---- planilha de repasse ----
@@ -1465,8 +1804,10 @@
     const fotos = [];
     for (const id of await Store.keys('photos')) {   // uma foto por vez, só para saber o tamanho
       if (!usadas.has(id)) continue;
-      const p = await Store.get('photos', id);
-      if (p) fotos.push({ id, bytes: (p.buf ? p.buf.byteLength : 0) + (p.tbuf ? p.tbuf.byteLength : 0) });
+      const p = await Store.get('photos', id); if (!p) continue;
+      const t = await Store.get('thumbs', id);
+      const mini = t && t.buf ? t.buf.byteLength : p.tbuf ? p.tbuf.byteLength : 0;
+      fotos.push({ id, bytes: (p.buf ? p.buf.byteLength : 0) + mini });
     }
     const limite = S.parteBytes || PARTE_BYTES;
     const partes = [[]]; let soma = 0;
@@ -1476,9 +1817,11 @@
     }
     return { id: C.uid('b'), em: new Date().toISOString(), dia: today(), partes, total: fotos.reduce((s, f) => s + f.bytes, 0), nFotos: fotos.length };
   }
+  // ignored segue como lista de chaves, que as versões antigas sabem ler; ignoradas leva também o motivo de cada uma.
+  // A lixeira não vai no backup: o backup guarda o que está em uso.
   function dadosBackup(plano) {
     return { app: 'registro-cirurgias', versao: 2, exportadoEm: plano.em, backupId: plano.id, partes: plano.partes.length, fotos: plano.nFotos,
-      records: S.records, terms: S.terms, repasses: S.repasses, loose: S.loose, ignored: [...S.ignored],
+      records: S.records, terms: S.terms, repasses: S.repasses, loose: S.loose, ignored: [...S.ignored], ignoradas: [...S.ignoredInfo.values()], imports: S.imports,
       settings: { ...S.settings, lastBackup: plano.dia, pinHash: null, pinSalt: null } };
   }
   async function montarParte(plano, i) {
@@ -1488,7 +1831,8 @@
     for (const id of plano.partes[i]) {
       const p = await Store.get('photos', id); if (!p) continue;
       files.push({ name: `fotos/${p.id}.${typeExt(p.type)}`, data: new Uint8Array(p.buf) });
-      if (p.tbuf) files.push({ name: `fotos/${p.id}.t.jpg`, data: new Uint8Array(p.tbuf) });
+      const t = await Store.get('thumbs', id); const mini = t && t.buf ? t.buf : p.tbuf;
+      if (mini) files.push({ name: `fotos/${p.id}.t.jpg`, data: new Uint8Array(mini) });
     }
     return C.zipWrite(files);
   }
@@ -1621,17 +1965,19 @@
           const o = pk.fotos.get(id);
           const buf = await (await C.zipEntryChecked(o.z, o.e)).arrayBuffer();
           const tbuf = o.te ? await (await C.zipEntryChecked(o.z, o.te)).arrayBuffer() : null;
-          await Store.put('photos', { id, name: o.e.base, type: extType(o.e.base), buf, tbuf });
+          await Store.apply([{ s: 'photos', put: { id, name: o.e.base, type: extType(o.e.base), buf } }, tbuf ? { s: 'thumbs', put: { id, buf: tbuf } } : null]);
           novas.push(id);
         }
         b.set(++i / Math.max(1, lista.length), `Conferindo e guardando as fotos: ${i} de ${lista.length}`);
       }
       b.set(1, 'Trocando os dados…');
       const keepPin = { pinHash: S.settings.pinHash, pinSalt: S.settings.pinSalt };
+      const ignoradas = Array.isArray(d.ignoradas) ? d.ignoradas.filter((g) => g && g.key) : (d.ignored || []).map((key) => ({ key }));
+      // a lixeira fica vazia: o que estava nela não está no backup
       await Store.replaceAll({ records: d.records || [], terms: d.terms || [], repasses: d.repasses || [], loose: d.loose || [],
-        ignored: (d.ignored || []).map((key) => ({ key })), meta: [{ ...DEFAULT_SETTINGS, ...(d.settings || {}), ...keepPin, k: 'settings' }] });
+        ignored: ignoradas, imports: Array.isArray(d.imports) ? d.imports : [], trash: [], meta: [{ ...DEFAULT_SETTINGS, ...(d.settings || {}), ...keepPin, k: 'settings' }] });
     } catch (e) {
-      for (const id of novas) { try { await Store.del('photos', id); } catch (x) { /* fica para a próxima limpeza */ } }
+      for (const id of novas) { try { await deletePhotos([id]); } catch (x) { /* fica para a próxima limpeza */ } }
       b.done(); anotaErro(e && e.message, 'restaurar');
       throw new Error('Nada foi mudado neste iPhone. ' + ((e && e.message) || ''));
     }
@@ -1686,7 +2032,8 @@
     try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e.usage != null) espaco = `${mb(e.usage)} usados${e.quota ? ` de ${mb(e.quota)}` : ''}`; } } catch (e) { /* sem estimativa */ }
     let sw = 'desligado';
     try { if (navigator.serviceWorker && navigator.serviceWorker.controller) sw = 'ligado'; if (window.caches) { const ks = await caches.keys(); if (ks.length) sw += ` (${ks.join(', ')})`; } } catch (e) { /* sem cache */ }
-    let nFotos = '?'; try { nFotos = (await Store.keys('photos')).length; } catch (e) { /* sem banco */ }
+    let nFotos = '?', nMinis = '?'; try { nFotos = (await Store.keys('photos')).length; nMinis = (await Store.keys('thumbs')).length; } catch (e) { /* sem banco */ }
+    const paradas = S.imports.filter((x) => x.estado === 'andamento').length;
     const quando = (iso) => { const d = new Date(iso); const z = (n) => String(n).padStart(2, '0'); return `${z(d.getDate())}/${z(d.getMonth() + 1)}/${d.getFullYear()} ${z(d.getHours())}:${z(d.getMinutes())}`; };
     return [
       'Controle de Cirurgias: diagnóstico',
@@ -1695,8 +2042,9 @@
       `Onde: ${onde}`,
       `Armazenamento: ${S.storage === 'idb' ? 'banco do aparelho' : 'só na memória, nada é salvo'}; ${espaco}`,
       `Cirurgias: ${S.records.length} (a receber ${n(isOpen)}, recebidas ${n((r) => r.status === 'recebido')}, sem cobrança ${n((r) => r.status === 'semcobranca')}, para completar ${n(needsReview)})`,
-      `Fotos guardadas: ${nFotos}; fotos sem legenda: ${S.loose.length}`,
-      `Nomes e abreviações: ${S.terms.length}; planilhas de repasse: ${S.repasses.length}`,
+      `Fotos guardadas: ${nFotos} (miniaturas: ${nMinis}); fotos sem legenda: ${S.loose.length}`,
+      `Nomes e abreviações: ${S.terms.length}; planilhas de repasse: ${S.repasses.length}; conversas importadas: ${S.imports.length}${paradas ? ` (${paradas} sem terminar)` : ''}`,
+      `Lixeira: ${S.trash.length}; mensagens ignoradas: ${S.ignored.size}`,
       `Último backup: ${S.settings.lastBackup ? ddmmyyyy(S.settings.lastBackup) : 'nunca'}`,
       `Senha para abrir: ${S.settings.pinHash ? 'ligada' : 'desligada'}`,
       `Uso sem internet: ${sw}`,
@@ -1857,6 +2205,7 @@
       h('span', { class: 't' }, h('b', null, 'Nova versão disponível'), h('small', null, 'Seus dados continuam iguais.')),
       h('button', { class: 'btn sm', type: 'button', onclick: () => location.reload() }, 'Atualizar')));
   }
-  window.__app = { S, go, render, routeFile, Store, VERSION, DATA_VERSION, TESTE, erros: ERROS, mostrarAviso: () => showUpdate() };
+  // para os testes automáticos e o diagnóstico no computador (não muda nada sozinho)
+  window.__app = { S, go, render, routeFile, Store, VERSION, DATA_VERSION, DB_VERSION, TESTE, erros: ERROS, mostrarAviso: () => showUpdate(), abrirFicha: (id) => sheetRecord(S.records.find((r) => r.id === id)) };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
