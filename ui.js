@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.8';
+  const VERSION = '1.9';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -90,6 +90,8 @@
   const daysSince = (d) => C.dayNum(today()) - C.dayNum(d);
   const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
   const cap = (s) => C.capFirst(s);
+  // junta partes de uma frase: "a", "a e b", "a, b e c" (as vazias saem)
+  const frase = (partes) => { const p = partes.filter(Boolean); return p.length > 1 ? p.slice(0, -1).join(', ') + ' e ' + p[p.length - 1] : p[0] || ''; };
   const sameYear = (d) => d.slice(0, 4) === today().slice(0, 4);
   function dataLonga(d, opts) {
     if (!d) return '';
@@ -138,6 +140,9 @@
       } catch (e) { anotaErro(e && (e.message || e.name), 'abrir o banco'); db = null; useMem(); return 'memory'; }
     }
     const keyOf = (s, v) => v[KEYS[s] || 'id'];
+    // toda ficha gravada leva junto o espelho do modelo financeiro (status, recebido, valorPrevisto), que a versão
+    // anterior do app lê. Assim, voltar de versão mostra os pagamentos certos.
+    const antes = (s, v) => { if (s === 'records' && v) C.compatFinanceiro(v); return v; };
     function run(s, mode, fn) {
       return new Promise((res, rej) => {
         const t = db.transaction(s, mode); const st = t.objectStore(s); const rq = fn(st);
@@ -149,8 +154,8 @@
       ready: () => !!(db || mem),
       all: (s) => (mem ? Promise.resolve([...mem[s].values()]) : run(s, 'readonly', (st) => st.getAll())),
       get: (s, k) => (mem ? Promise.resolve(mem[s].get(k)) : run(s, 'readonly', (st) => st.get(k))),
-      put: (s, v) => (mem ? (mem[s].set(keyOf(s, v), v), Promise.resolve()) : run(s, 'readwrite', (st) => st.put(v))),
-      putMany: (s, arr) => (mem ? (arr.forEach((v) => mem[s].set(keyOf(s, v), v)), Promise.resolve()) : (arr.length ? run(s, 'readwrite', (st) => { arr.forEach((v) => st.put(v)); return null; }) : Promise.resolve())),
+      put: (s, v) => (antes(s, v), mem ? (mem[s].set(keyOf(s, v), v), Promise.resolve()) : run(s, 'readwrite', (st) => st.put(v))),
+      putMany: (s, arr) => (arr.forEach((v) => antes(s, v)), mem ? (arr.forEach((v) => mem[s].set(keyOf(s, v), v)), Promise.resolve()) : (arr.length ? run(s, 'readwrite', (st) => { arr.forEach((v) => st.put(v)); return null; }) : Promise.resolve())),
       del: (s, k) => (mem ? (mem[s].delete(k), Promise.resolve()) : run(s, 'readwrite', (st) => st.delete(k))),
       clear: (s) => (mem ? (mem[s].clear(), Promise.resolve()) : run(s, 'readwrite', (st) => st.clear())),
       keys: (s) => (mem ? Promise.resolve([...mem[s].keys()]) : run(s, 'readonly', (st) => st.getAllKeys())),
@@ -158,6 +163,7 @@
       // ops: [{ s: 'records', put: valor } | { s: 'photos', del: chave }]
       apply: (ops) => {
         ops = (ops || []).filter(Boolean); if (!ops.length) return Promise.resolve();
+        for (const o of ops) if (!('del' in o)) antes(o.s, o.put);
         if (mem) { for (const o of ops) { if ('del' in o) mem[o.s].delete(o.del); else mem[o.s].set(keyOf(o.s, o.put), o.put); } return Promise.resolve(); }
         return new Promise((res, rej) => {
           const t = db.transaction([...new Set(ops.map((o) => o.s))], 'readwrite');
@@ -168,6 +174,7 @@
       // troca o conteúdo de várias listas de uma vez só: ou tudo muda, ou nada muda
       replaceAll: (map) => {
         const names = Object.keys(map);
+        for (const s of names) for (const v of map[s]) antes(s, v);
         if (mem) { for (const s of names) { mem[s].clear(); for (const v of map[s]) mem[s].set(keyOf(s, v), v); } return Promise.resolve(); }
         return new Promise((res, rej) => {
           const t = db.transaction(names, 'readwrite');
@@ -194,6 +201,8 @@
     S.terms = terms;
     const er = meta.find((m) => m.k === 'erros'); if (er && Array.isArray(er.lista)) ERROS.splice(0, ERROS.length, ...er.lista.slice(-20));
     await migrate();
+    // ficha gravada por uma versão antiga do app (depois de voltar de versão): entra no modelo financeiro novo
+    if (!S.dadosNovos && (S.settings.dataVersion || 0) >= 4) { const velhas = S.records.filter((r) => C.reconciliarFinanceiro(r)); if (velhas.length) await Store.putMany('records', velhas); }
     // a numeração das fichas nunca anda para trás, mesmo se o app fechou no meio de uma importação
     const maior = Math.max(0, ...S.records.map((r) => r.num || 0), ...S.trash.map((x) => (x.rec && x.rec.num) || 0));
     if (maior > (S.settings.seq || 0)) S.settings.seq = maior;
@@ -243,6 +252,14 @@
         else { r.time = null; r.revisar = uniq([...(r.revisar || []), ...C.avisosDoEnvio(r.msgDate, r.msgTime, hol)]); }
         mudar.push(r);
       }
+      await Store.putMany('records', mudar);
+    } },
+    // Item 22: cada ficha passa a ter valor devido (devido e devidoOrigem), a lista de pagamentos e, calculados, o saldo e
+    // a situação (a receber, parcial, recebida, sem cobrança). O pagamento que havia vira o primeiro da lista; o valor
+    // combinado vira valor devido "combinado"; a ficha paga por planilha fica com o devido da planilha. Nada é apagado:
+    // status, recebido e valorPrevisto continuam, como espelho para a versão anterior. As fichas são copiadas antes.
+    { v: 4, nome: 'valor devido, pagamentos e saldo', copia: ['records'], async run() {
+      const mudar = S.records.filter((r) => C.migrarFinanceiro(r));
       await Store.putMany('records', mudar);
     } },
   ];
@@ -394,7 +411,10 @@
   }
 
   // ================= regras =================
-  const isOpen = (r) => r.status === 'aberto';
+  // situação pelo modelo financeiro (core.js): 'aberto' (a receber), 'parcial', 'recebido' ou 'semcobranca'
+  const sit = (r) => C.situacao(r);
+  const isOpen = (r) => C.emAberto(r);              // a receber, inclusive as pagas só em parte
+  const isPaid = (r) => sit(r) === 'recebido';
   const urgOf = (r) => C.isUrgent(r.date, r.time, S.hol);
   const isLate = (r) => isOpen(r) && daysSince(r.date) > S.settings.alertDias;
   // o que falta no cadastro: avisos da importação + procedimento, hospital ou colega em branco.
@@ -411,20 +431,48 @@
   }
   const needsReview = (r) => pendencias(r).length > 0;
   const backupDue = () => !PREVIEW && S.records.length > 0 && (!S.settings.lastBackup || daysSince(S.settings.lastBackup) > 30);
+  // O dinheiro de uma cirurgia, separado como no modelo financeiro: valor devido, pagamentos, total recebido, saldo e,
+  // quando ainda não há valor devido, a estimativa (sempre aproximada). aReceber é o saldo, ou a estimativa menos o
+  // que já entrou.
+  function fin(r) {
+    const s = sit(r); const pg = r.pagamentos || [];
+    const recebido = C.totalRecebido(r);
+    const devido = r.devido != null ? r.devido : null;
+    const saldo = devido != null ? C.round2(devido - recebido) : null;
+    let aReceber = null, aprox = false, est = null;
+    if (s === 'aberto' || s === 'parcial') {
+      if (saldo != null) aReceber = Math.max(0, saldo);
+      else { est = C.estimate(r, S.refs, S.index, S.hol); if (est && est.valor != null) { aReceber = Math.max(0, C.round2(est.valor - recebido)); aprox = true; } }
+    }
+    return { s, pg, recebido, semValorAnotado: pg.some((p) => p.valor == null), devido, origem: r.devidoOrigem || null, saldo, aReceber, aprox, est };
+  }
   function valueOf(r) {
-    if (r.status === 'recebido') return { v: r.recebido ? r.recebido.valor : null, kind: 'recebido' };
-    if (r.status === 'semcobranca') return { v: 0, kind: 'semcobranca' };
-    if (r.valorPrevisto != null) return { v: r.valorPrevisto, kind: 'previsto' };
-    const e = C.estimate(r, S.refs, S.index, S.hol);
-    if (e && e.valor != null) return { v: e.valor, kind: 'estimado', parcial: e.parcial };
+    const f = fin(r);
+    if (f.s === 'recebido') return { v: f.semValorAnotado ? null : f.recebido, kind: 'recebido' };
+    if (f.s === 'semcobranca') return { v: 0, kind: 'semcobranca' };
+    if (f.aReceber != null) return { v: f.aReceber, kind: f.aprox ? 'estimado' : 'previsto', parcial: !!(f.est && f.est.parcial) };
     return { v: null, kind: 'semvalor' };
   }
   function statusOf(r) {
-    if (r.status === 'recebido') return ['Recebida', 'ok'];
-    if (r.status === 'semcobranca') return ['Sem cobrança', 'plain'];
+    const s = sit(r);
+    if (s === 'recebido') return ['Recebida', 'ok'];
+    if (s === 'semcobranca') return ['Sem cobrança', 'plain'];
     if (needsReview(r)) return ['Completar', 'warn'];
+    if (s === 'parcial') return ['Parcial', 'accent'];
     if (isLate(r)) return ['Atrasada', 'danger'];
     return ['A receber', 'accent'];
+  }
+  // Dinheiro que entrou, pelo mês em que caiu. Da planilha em que ela anotou quanto caiu de fato na conta, vale esse
+  // valor (já sem retenções e taxas), para bater com o extrato do banco.
+  function recebidoPorMes() {
+    const m = new Map(); const soma = (k, v) => m.set(k, C.round2((m.get(k) || 0) + v));
+    const caiu = new Map(S.repasses.filter((x) => x.caiu != null && x.pay).map((x) => [x.id, x]));
+    for (const r of S.records) for (const p of r.pagamentos || []) {
+      if (!p.data || p.valor == null || (p.origem === 'repasse' && caiu.has(p.repId))) continue;
+      soma(p.data.slice(0, 7), p.valor);
+    }
+    for (const x of caiu.values()) soma(x.pay.slice(0, 7), x.caiu);
+    return m;
   }
   const procText = (r) => (r.procs && r.procs.length ? r.procs.join(' + ') : 'Procedimento não informado');
   function ondeCom(r) {
@@ -449,13 +497,12 @@
   }
   function metrics() {
     const open = S.records.filter(isOpen);
-    let aReceber = 0, semValor = 0;
-    for (const r of open) { const v = valueOf(r); if (v.v != null) aReceber += v.v; else semValor++; }
-    const mes = today().slice(0, 7);
-    const rec = S.records.filter((r) => r.status === 'recebido' && r.recebido && r.recebido.data);
+    // "Para receber" = saldos confirmados (há valor devido) + estimativas (sem valor devido), mostrados em separado
+    let conf = 0, est = 0, semValor = 0;
+    for (const r of open) { const f = fin(r); if (f.aReceber == null) semValor++; else if (f.aprox) est += f.aReceber; else conf += f.aReceber; }
     return {
-      open: open.length, aReceber: C.round2(aReceber), semValor,
-      recMes: rec.filter((r) => r.recebido.data.startsWith(mes)).reduce((s, r) => s + (r.recebido.valor || 0), 0),
+      open: open.length, aReceber: C.round2(conf + est), confirmados: C.round2(conf), estimados: C.round2(est), semValor,
+      recMes: recebidoPorMes().get(today().slice(0, 7)) || 0,
       late: open.filter(isLate).length, review: S.records.filter(needsReview).length, loose: S.loose.length, checks: S.checks.length,
     };
   }
@@ -640,9 +687,11 @@
     } else {
       const [int, dec] = nf2.format(m.aReceber).split(',');
       big = h('span', { class: 'big' }, h('span', { class: 'cur' }, 'R$'), int, h('span', { class: 'cents' }, ',' + dec));
-      // duas linhas curtas em vez de uma frase que quebra no meio
-      sub = [h('span', null, `Soma aproximada de ${plural(m.open, 'cirurgia', 'cirurgias')}`), m.semValor ? h('span', null, `${m.semValor} ainda sem valor`) : null];
-      label = `Para receber: cerca de ${brl(m.aReceber)}, de ${plural(m.open, 'cirurgia', 'cirurgias')}${m.semValor ? `, ${m.semValor} ainda sem valor` : ''}. Ver as cirurgias a receber.`;
+      // duas linhas curtas em vez de uma frase que quebra no meio; confirmado e estimado aparecem separados
+      const partes = m.confirmados && m.estimados ? `${brl0(m.confirmados)} confirmados + ≈ ${brl0(m.estimados)} estimados`
+        : m.confirmados ? `Valor confirmado de ${plural(m.open - m.semValor, 'cirurgia', 'cirurgias')}` : `Soma aproximada de ${plural(m.open, 'cirurgia', 'cirurgias')}`;
+      sub = [h('span', null, partes), m.semValor ? h('span', null, `${m.semValor} ainda sem valor`) : null];
+      label = `Para receber: ${m.estimados ? 'cerca de ' : ''}${brl(m.aReceber)}${m.confirmados && m.estimados ? `, sendo ${brl(m.confirmados)} confirmados e cerca de ${brl(m.estimados)} estimados` : ''}, de ${plural(m.open, 'cirurgia', 'cirurgias')}${m.semValor ? `, ${m.semValor} ainda sem valor` : ''}. Ver as cirurgias a receber.`;
     }
     out.push(h('button', { class: 'hero', type: 'button', onclick: () => go('lista', { status: 'aberto' }), 'aria-label': label },
       h('span', { class: 'label' }, 'Para receber'), big, h('span', { class: 'sub' }, sub), h('span', { class: 'stitch', 'aria-hidden': 'true' }), strip));
@@ -683,7 +732,7 @@
     f = f || S.f; const q = C.norm(f.q); const rng = periodRange(f.periodo);
     return S.records.filter((r) => {
       if (f.status === 'aberto' && !isOpen(r)) return false;
-      if (f.status === 'recebido' && r.status !== 'recebido') return false;
+      if (f.status === 'recebido' && !isPaid(r)) return false;
       if (f.status === 'atrasadas' && !isLate(r)) return false;
       if (f.status === 'revisar' && !needsReview(r)) return false;
       if (rng && (r.date < rng[0] || r.date > rng[1])) return false;
@@ -704,7 +753,7 @@
     const search = h('input', { id: 'busca', type: 'search', placeholder: 'Buscar cirurgia, colega ou hospital', value: S.f.q, autocomplete: 'off', 'aria-label': 'Buscar' });
     search.addEventListener('input', () => { S.f.q = search.value; drawList(); });
     out.push(h('div', { class: 'search' }, icon('search'), search));
-    const counts = { todas: S.records.length, aberto: S.records.filter(isOpen).length, atrasadas: S.records.filter(isLate).length, recebido: S.records.filter((r) => r.status === 'recebido').length, revisar: S.records.filter(needsReview).length };
+    const counts = { todas: S.records.length, aberto: S.records.filter(isOpen).length, atrasadas: S.records.filter(isLate).length, recebido: S.records.filter(isPaid).length, revisar: S.records.filter(needsReview).length };
     const extra = ['periodo', 'col', 'hosp', 'conv'].filter((k) => (k === 'periodo' ? S.f.periodo !== 'tudo' : S.f[k]));
     out.push(h('div', { class: 'toolbar' },
       h('div', { class: 'chips', role: 'group', 'aria-label': 'Situação' }, [['todas', 'Todas'], ['aberto', 'A receber'], ['atrasadas', 'Atrasadas'], ['recebido', 'Recebidas'], ['revisar', 'Completar']]
@@ -761,7 +810,7 @@
       return;
     } else if (kind === 'recebido') {
       if (!(await confirmDialog({ title: `Marcar ${plural(n, 'cirurgia', 'cirurgias')} como recebidas?`, text: 'Bom para as que já foram pagas antes de você usar o app. O valor fica em branco e você pode completar depois.', ok: 'Marcar' }))) return;
-      for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r && r.status !== 'recebido') { r.status = 'recebido'; r.recebido = { valor: null, data: today(), origem: 'manual' }; await saveRecord(r); } }
+      for (const id of ids) { const r = S.records.find((x) => x.id === id); if (r && isOpen(r)) { r.pagamentos = [...(r.pagamentos || []), { id: C.uid('g'), valor: null, data: today(), origem: 'manual' }]; await saveRecord(r); } }
     }
     S.selecting = false; S.sel.clear(); derive(); render(); toast('Pronto.');
   }
@@ -789,8 +838,10 @@
     const by = new Map();
     for (const r of S.records) for (const k of [].concat(keyFn(r))) {
       if (!k) continue; if (!by.has(k)) by.set(k, { n: 0, rec: 0, est: 0, nRec: 0, nAb: 0 });
-      const o = by.get(k); o.n++; const v = valueOf(r);
-      if (v.kind === 'recebido') { o.rec += v.v || 0; o.nRec++; } else if (isOpen(r)) { o.nAb++; if (v.v != null) o.est += v.v; }
+      const o = by.get(k); o.n++; const f = fin(r);
+      if (f.s === 'semcobranca') continue;
+      o.rec += f.recebido;                           // o que já entrou, inclusive a parte de uma cirurgia paga em parte
+      if (f.s === 'recebido') o.nRec++; else { o.nAb++; if (f.aReceber != null) o.est += f.aReceber; }
     }
     return by;
   }
@@ -799,7 +850,7 @@
   function repTabela() {
     const f = S.tabF || 'todas';
     const all = [...S.records].sort(byDateDesc);
-    const isRec = (r) => r.status === 'recebido';
+    const isRec = isPaid;
     const counts = { todas: all.length, nao: all.filter(isOpen).length, sim: all.filter(isRec).length };
     const rows = all.filter((r) => f === 'todas' || (f === 'sim' ? isRec(r) : isOpen(r)));
     const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Mostrar' }, [['todas', 'Todas'], ['nao', 'Não recebidas'], ['sim', 'Recebidas']]
@@ -814,9 +865,9 @@
       const v = valueOf(r);
       const valTxt = v.kind === 'semcobranca' || v.v == null ? '—' : v.kind === 'estimado' ? '≈ ' + brl0(v.v) : brl(v.v);
       const cols = (r.cols || []).join(', ');
-      const recEl = isRec(r) ? h('span', { class: 'pill sim' }, 'Sim') : r.status === 'semcobranca' ? h('span', { class: 'pill sc' }, '—') : h('span', { class: 'pill nao' }, 'Não');
+      const recEl = isRec(r) ? h('span', { class: 'pill sim' }, 'Sim') : r.status === 'semcobranca' ? h('span', { class: 'pill sc' }, '—') : sit(r) === 'parcial' ? h('span', { class: 'pill parte' }, 'Parte') : h('span', { class: 'pill nao' }, 'Não');
       kids.push(h('button', { class: 'trow', type: 'button', onclick: () => sheetRecord(r),
-        'aria-label': `${dataLonga(r.date, { ano: true })}: ${procText(r)}${cols ? ', com ' + cols : ''}${r.hosp ? ', ' + r.hosp : ''}. Valor ${valTxt === '—' ? 'sem valor' : valTxt}. ${isRec(r) ? 'Recebida' : r.status === 'semcobranca' ? 'Sem cobrança' : 'Não recebida'}.` },
+        'aria-label': `${dataLonga(r.date, { ano: true })}: ${procText(r)}${cols ? ', com ' + cols : ''}${r.hosp ? ', ' + r.hosp : ''}. Valor ${valTxt === '—' ? 'sem valor' : valTxt}. ${isRec(r) ? 'Recebida' : r.status === 'semcobranca' ? 'Sem cobrança' : sit(r) === 'parcial' ? 'Recebida em parte' : 'Não recebida'}.` },
         h('span', { class: 'c-data' }, ddmm(r.date)), h('span', { class: 'c-op' }, procShort(r)),
         h('span', { class: 'c-sub' }, h('span', { class: cols ? null : 'empty' }, cols || '—'), h('span', { class: r.hosp ? null : 'empty' }, r.hosp || '—')),
         h('span', { class: 'c-val' + (v.kind === 'estimado' ? ' aprox' : '') }, valTxt), h('span', { class: 'c-rec' }, recEl)));
@@ -866,8 +917,7 @@
     if (S.checks.length) watch.push(rowBtn('moon', 'night', plural(S.checks.length, 'pagamento sem o adicional noturno', 'pagamentos sem o adicional noturno'), 'feitas à noite, no fim de semana ou em feriado', () => { S.relTab = 'totais'; render(); const el = $('#sec-conferir') || $('#sec-convenios'); if (el) el.scrollIntoView({ block: 'start' }); }));
     const rows = [...keys].reverse().map((k) => { const o = by.get(k); const [a, b] = moneyLines(o);
       return rowBtn(null, null, monthName(k), plural(o.n, 'cirurgia', 'cirurgias'), null, h('span', { class: 'v' }, a, b ? h('small', null, b) : null)); });
-    const pays = new Map();
-    for (const r of S.records) if (r.status === 'recebido' && r.recebido && r.recebido.data) { const k = r.recebido.data.slice(0, 7); pays.set(k, (pays.get(k) || 0) + (r.recebido.valor || 0)); }
+    const pays = recebidoPorMes();
     const out = [chart];
     if (watch.length) out.push(h('section', { class: 'sec' }, secTitle('Para acompanhar'), h('div', { class: 'group' }, watch)));
     out.push(h('section', { class: 'sec' }, secTitle('Mês a mês'), h('p', { class: 'note' }, 'Pelo mês em que a cirurgia foi feita.'), h('div', { class: 'group flat' }, rows)));
@@ -976,7 +1026,7 @@
 
   // ================= ficha da cirurgia =================
   function newRecord(over) {
-    return { id: C.uid('r'), num: 0, key: null, origem: 'manual', grupo: '', date: today(), time: null, procs: [], hosp: null, cols: [], conv: null, funcao: null, valorPrevisto: null, status: 'aberto', recebido: null, rep: [], caption: '', notas: '', photoIds: [], photoNames: [], revisar: [], createdAt: Date.now(), updatedAt: Date.now(), ...(over || {}) };
+    return { id: C.uid('r'), num: 0, key: null, origem: 'manual', grupo: '', date: today(), time: null, procs: [], hosp: null, cols: [], conv: null, funcao: null, valorPrevisto: null, status: 'aberto', recebido: null, rep: [], devido: null, devidoOrigem: null, pagamentos: [], caption: '', notas: '', photoIds: [], photoNames: [], revisar: [], createdAt: Date.now(), updatedAt: Date.now(), ...(over || {}) };
   }
   function sheetRecord(rec, opts) {
     opts = opts || {};
@@ -1066,7 +1116,8 @@
         return h('div', { class: 'addrow' }, inp, h('button', { class: 'btn soft', type: 'button', onclick: doAdd }, 'Incluir'), h('datalist', { id: id + '-l' }, names.map((n) => h('option', { value: n }))));
       };
       const procOpts = uniq([...topUsed('procs', 8), 'Colecistectomia videolaparoscópica', 'Apendicectomia videolaparoscópica', 'Herniorrafia']).slice(0, 8);
-      const valIn = h('input', { type: 'text', inputmode: 'decimal', value: moneyInput(x.valorPrevisto), placeholder: 'Se já souber', oninput: (e) => { x.valorPrevisto = parseMoney(e.target.value); mark(); } });
+      // valor combinado = valor devido que ela mesma anotou (o da planilha de repasse entra sozinho)
+      const valIn = h('input', { type: 'text', inputmode: 'decimal', value: moneyInput(x.devido), placeholder: 'Se já souber', oninput: (e) => { x.devido = parseMoney(e.target.value); x.devidoOrigem = x.devido != null ? 'combinado' : null; mark(); } });
       const notas = h('textarea', { rows: 3, placeholder: 'Sem nome nem dados do paciente', oninput: (e) => { x.notas = e.target.value; mark(); } }); notas.value = x.notas || '';
       kids.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() },
         h('div', { class: 'grid2' }, field('Data', dateIn), field('Hora', timeIn)), urgEl,
@@ -1109,32 +1160,107 @@
     return add;
   }
   function statusTag(r) { const [st, tone] = statusOf(r); return h('span', { class: 'st ' + tone }, st); }
+  // ================= financeiro da cirurgia =================
+  // O bloco mostra, separados: quanto falta (ou quanto entrou), o valor devido, cada pagamento e o saldo.
+  // A estimativa aparece sempre com ≈ e só enquanto não há valor devido.
+  const nomeRepasse = (id) => { const x = S.repasses.find((y) => y.id === id); return x && x.numero ? 'planilha nº ' + x.numero : 'planilha de repasse'; };
   function payCard(d, persist) {
-    const v = valueOf(d);
-    if (d.status === 'recebido') {
-      const rp = d.recebido || {};
-      const rep = S.repasses.find((x) => x.id === rp.repId);
-      return h('div', { class: 'paycard done' },
-        h('div', { class: 'top' }, h('div', null, h('div', { class: 'what' }, rp.data ? 'Recebida em ' + dataLonga(rp.data, { semDia: true, ano: !sameYear(rp.data) }) : 'Recebida'), h('div', { class: 'amount' + (rp.valor == null ? ' txt' : '') }, rp.valor == null ? 'Valor não informado' : brl(rp.valor)))),
-        h('div', { class: 'hint' }, rp.origem === 'repasse' ? `Pela planilha de repasse${rep && rep.numero ? ' nº ' + rep.numero : ''}.` : 'Registrado por você.'),
-        h('div', { class: 'btnrow' },
-          h('button', { class: 'btn sm', type: 'button', onclick: async () => { const out = await payDialog(d, rp.valor, rp.data); if (out) { d.recebido = { ...rp, valor: out.valor, data: out.data }; await persist(); } } }, 'Corrigir valor'),
-          h('button', { class: 'btn sm ghost', type: 'button', onclick: async () => { d.status = 'aberto'; d.recebido = null; await persist(); toast('Voltou para a receber.'); } }, 'Desfazer')));
+    const f = fin(d);
+    if (f.s === 'semcobranca') return h('div', { class: 'paycard muted' }, h('div', { class: 'what' }, 'Marcada como sem cobrança'), h('button', { class: 'btn sm', type: 'button', onclick: async () => { d.status = 'aberto'; await persist(); } }, 'Voltar para a receber'));
+    const linha = (k, v, sub, acao) => h('div', { class: 'fin-row' }, h('span', { class: 'k' }, k, sub ? h('small', null, sub) : null),
+      h('span', { class: 'v' }, v, acao ? h('button', { class: 'link', type: 'button', onclick: acao }, 'Corrigir') : null));
+    const linhas = [];
+    if (f.pg.length || f.devido != null) {
+      // recebida sem valor devido (paga à mão): só os pagamentos; a receber sem valor devido: "A definir", sem inventar saldo
+      if (f.devido != null || f.s !== 'recebido') linhas.push(linha('Valor devido', f.devido != null ? brl(f.devido) : 'A definir', f.devido == null ? null : f.origem === 'repasse' ? 'pela planilha de repasse' : 'combinado'));
+      for (const p of f.pg) linhas.push(linha(p.data ? 'Pago em ' + ddmmyyyy(p.data) : 'Pago', p.valor == null ? 'Valor não informado' : brl(p.valor),
+        p.origem === 'repasse' ? 'pela ' + nomeRepasse(p.repId) : p.parcial ? 'uma parte, registrada por você' : 'registrado por você',
+        p.origem === 'repasse' ? null : () => editarPagamento(d, p, persist)));
+      if (f.saldo != null && f.pg.length && !f.semValorAnotado) linhas.push(linha(f.saldo > 0.004 ? 'Falta receber' : f.saldo < -0.004 ? 'Recebido a mais' : 'Saldo', brl(Math.abs(f.saldo))));
     }
-    if (d.status === 'semcobranca') return h('div', { class: 'paycard muted' }, h('div', { class: 'what' }, 'Marcada como sem cobrança'), h('button', { class: 'btn sm', type: 'button', onclick: async () => { d.status = 'aberto'; await persist(); } }, 'Voltar para a receber'));
-    const dias = daysSince(d.date);
+    const fin_ = linhas.length ? h('div', { class: 'fin' }, linhas) : null;
+    if (f.s === 'recebido') {
+      const ult = f.pg[f.pg.length - 1] || {};
+      // Desfazer tira o último pagamento registrado por ela (o da planilha sai desfazendo a planilha, em Ajustes)
+      const desfazer = ult.id && ult.origem !== 'repasse' ? h('div', { class: 'btnrow' }, h('button', { class: 'btn sm ghost', type: 'button', onclick: async () => {
+        d.pagamentos = (d.pagamentos || []).filter((x) => x.id !== ult.id); await persist(); toast(isOpen(d) ? 'Voltou para a receber.' : 'Pagamento desfeito.'); } }, 'Desfazer')) : null;
+      return h('div', { class: 'paycard done' },
+        h('div', { class: 'top' }, h('div', null, h('div', { class: 'what' }, ult.data ? 'Recebida em ' + dataLonga(ult.data, { semDia: true, ano: !sameYear(ult.data) }) : 'Recebida'),
+          h('div', { class: 'amount' + (f.semValorAnotado ? ' txt' : '') }, f.semValorAnotado ? 'Valor não informado' : brl(f.recebido)))),
+        fin_, desfazer);
+    }
+    const v = valueOf(d); const dias = daysSince(d.date);
+    const titulo = f.s === 'parcial' ? 'Falta receber' : f.devido != null && f.origem === 'combinado' ? 'Valor combinado' : 'A receber';
+    const dica = v.kind === 'estimado' ? (f.s === 'parcial' ? `Aproximado: a estimativa menos os ${brl(f.recebido)} que já entraram.` : `Valor aproximado, pela média do que você já recebeu${v.parcial ? '. Um dos procedimentos ainda não tem referência' : ''}.`)
+      : v.kind === 'semvalor' ? (f.s === 'parcial' ? `Já entraram ${brl(f.recebido)}. Quando souber o valor todo, coloque em Editar, como valor combinado.` : 'Ainda não há planilha com esse procedimento para estimar o valor.') : null;
     return h('div', { class: 'paycard' },
-      h('div', { class: 'top' }, h('div', null, h('div', { class: 'what' }, v.kind === 'previsto' ? 'Valor combinado' : 'A receber'), h('div', { class: 'amount' + (v.kind === 'estimado' ? ' aprox' : '') + (v.v == null ? ' txt' : '') }, v.v == null ? 'Sem valor ainda' : (v.kind === 'estimado' ? '≈ ' : '') + brl(v.v))), statusOf(d)[1] === 'accent' ? null : statusTag(d)),
-      v.kind === 'estimado' ? h('div', { class: 'hint' }, `Valor aproximado, pela média do que você já recebeu${v.parcial ? '. Um dos procedimentos ainda não tem referência' : ''}.`) : v.kind === 'semvalor' ? h('div', { class: 'hint' }, 'Ainda não há planilha com esse procedimento para estimar o valor.') : null,
+      h('div', { class: 'top' }, h('div', null, h('div', { class: 'what' }, titulo), h('div', { class: 'amount' + (v.kind === 'estimado' ? ' aprox' : '') + (v.v == null ? ' txt' : '') }, v.v == null ? 'Sem valor ainda' : (v.kind === 'estimado' ? '≈ ' : '') + brl(v.v))), statusOf(d)[1] === 'accent' ? null : statusTag(d)),
+      dica ? h('div', { class: 'hint' }, dica) : null,
       isLate(d) ? h('div', { class: 'alert-line' }, `Esperando há ${dias} dias.`) : null,
+      fin_,
       h('div', { class: 'btnrow' },
-        h('button', { class: 'btn primary', type: 'button', onclick: async () => { const out = await payDialog(d, d.valorPrevisto != null ? d.valorPrevisto : v.v, today()); if (out) { d.status = 'recebido'; d.recebido = { valor: out.valor, data: out.data, origem: 'manual' }; await persist(); toast('Marcada como recebida.'); } } }, 'Já recebi'),
-        h('button', { class: 'btn', type: 'button', onclick: async () => { d.status = 'semcobranca'; await persist(); } }, 'Não vou cobrar')));
+        h('button', { class: 'btn primary', type: 'button', onclick: () => registrarPagamento(d, persist) }, f.s === 'parcial' ? 'Registrar pagamento' : 'Já recebi'),
+        f.s === 'aberto' ? h('button', { class: 'btn', type: 'button', onclick: async () => { d.status = 'semcobranca'; await persist(); } }, 'Não vou cobrar') : null));
   }
-  async function payDialog(d, valor, data) {
-    const out = await formDialog({ title: 'Quanto você recebeu?', text: procText(d), ok: 'Confirmar', fields: [{ id: 'v', label: 'Valor (R$)', inputmode: 'decimal', value: moneyInput(valor), placeholder: '0,00' }, { id: 'd', label: 'Dia em que caiu', type: 'date', value: data || today() }] });
-    if (!out) return null;
-    return { valor: parseMoney(out.v), data: out.d || today() };
+  // Pagamento novo pela ficha. Sem valor devido, ela diz se foi o valor todo; se foi só uma parte e ela souber quanto
+  // falta, o valor devido passa a ser o que entrou mais o que falta (valor combinado).
+  async function registrarPagamento(d, persist) {
+    const f = fin(d);
+    const out = await payDialog(d, { valor: f.aReceber, data: today() });
+    if (!out) return;
+    d.pagamentos = [...(d.pagamentos || []), { id: C.uid('g'), valor: out.valor, data: out.data, origem: 'manual', parcial: out.parcial || undefined }];
+    if (out.parcial && out.falta != null && out.falta > 0) { d.devido = C.round2(C.totalRecebido(d) + out.falta); d.devidoOrigem = 'combinado'; }
+    await persist();
+    const depois = fin(d);
+    toast(isPaid(d) ? 'Marcada como recebida.' : depois.saldo != null ? `Pagamento registrado. Faltam ${brl(depois.saldo)}.` : 'Pagamento registrado. O resto continua a receber.');
+  }
+  async function editarPagamento(d, p, persist) {
+    const out = await payDialog(d, { valor: p.valor, data: p.data, parcial: !!p.parcial, editando: p });
+    if (!out) return;
+    if (out.apagar) d.pagamentos = (d.pagamentos || []).filter((x) => x.id !== p.id);
+    else d.pagamentos = (d.pagamentos || []).map((x) => (x.id === p.id ? { ...x, valor: out.valor, data: out.data, parcial: out.parcial || undefined } : x));
+    if (!out.apagar && out.parcial && out.falta != null && out.falta > 0) { d.devido = C.round2(C.totalRecebido(d) + out.falta); d.devidoOrigem = 'combinado'; }
+    await persist();
+    toast(out.apagar ? 'Pagamento apagado.' : 'Pagamento corrigido.');
+  }
+  // "Quanto você recebeu?": valor e dia. Sem valor devido: "Foi o valor todo?" e, se foi uma parte, quanto falta.
+  // Com valor devido: mostra quanto ainda falta depois deste pagamento.
+  function payDialog(d, o) {
+    o = o || {};
+    return new Promise((res) => {
+      const f = fin(d); const semDevido = f.devido == null;
+      const jaEntrou = C.round2(f.recebido - (o.editando && o.editando.valor ? o.editando.valor : 0));
+      let parte = !!o.parcial;
+      const vIn = h('input', { id: 'pd-valor', type: 'text', inputmode: 'decimal', value: moneyInput(o.valor), placeholder: '0,00', autocomplete: 'off' });
+      const dIn = h('input', { id: 'pd-data', type: 'date', value: o.data || today() });
+      const faltaIn = h('input', { id: 'pd-falta', type: 'text', inputmode: 'decimal', placeholder: 'Se souber', autocomplete: 'off' });
+      const box = h('div');
+      const desenhar = () => {
+        if (semDevido) {
+          box.replaceChildren(h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Foi o valor todo?'),
+            seg([['tudo', 'Sim, tudo'], ['parte', 'Não, só uma parte']], parte ? 'parte' : 'tudo', (v) => { parte = v === 'parte'; desenhar(); }, 'Foi o valor todo?')),
+            parte ? h('div', { class: 'field' }, h('label', { for: 'pd-falta' }, 'Quanto ainda falta (R$)'), faltaIn, h('div', { class: 'hint' }, 'Se não souber, deixe em branco.')) : null);
+        } else {
+          const falta = C.round2(f.devido - jaEntrou - (parseMoney(vIn.value) || 0));
+          box.replaceChildren(h('p', { class: 'note', id: 'pd-info' }, falta > 0.004 ? `Depois deste pagamento, ainda faltam ${brl(falta)} dos ${brl(f.devido)} devidos.` : 'Com este pagamento, a cirurgia fica quitada.'));
+        }
+      };
+      vIn.addEventListener('input', desenhar); desenhar();
+      const done = (out) => { wrap.remove(); res(out); };
+      const ok = () => {
+        const valor = parseMoney(vIn.value);
+        if (parte && !(valor > 0)) { toast('Coloque quanto entrou.'); return; }
+        done({ valor, data: dIn.value || today(), parcial: semDevido && parte, falta: semDevido && parte ? parseMoney(faltaIn.value) : null });
+      };
+      const wrap = h('div', { class: 'dialog-wrap' }, h('form', { class: 'dialog', onsubmit: (e) => { e.preventDefault(); ok(); } },
+        h('h3', null, o.editando ? 'Corrigir pagamento' : 'Quanto você recebeu?'), h('p', null, procText(d)),
+        h('div', { class: 'field' }, h('label', { for: 'pd-valor' }, 'Valor (R$)'), vIn),
+        h('div', { class: 'field' }, h('label', { for: 'pd-data' }, 'Dia em que caiu'), dIn),
+        box,
+        o.editando ? h('button', { class: 'link danger', type: 'button', style: 'align-self:flex-start', onclick: () => done({ apagar: true }) }, 'Apagar este pagamento') : null,
+        h('div', { class: 'dialog-actions' }, h('button', { type: 'button', class: 'btn', onclick: () => done(null) }, 'Cancelar'), h('button', { type: 'submit', class: 'btn primary' }, 'Confirmar'))));
+      document.body.append(wrap);
+    });
   }
   // ================= lixeira =================
   // Excluir manda para a lixeira por 30 dias: a ficha (ou a foto) sai das listas, mas as fotos continuam guardadas.
@@ -1241,7 +1367,11 @@
       if (!t.hosp) t.hosp = d.hosp; if (!t.cols.length) t.cols = d.cols.slice(); if (!t.time) t.time = d.time; if (!t.conv) t.conv = d.conv;
       if (d.caption) t.caption = t.caption ? t.caption + '\n' + d.caption : d.caption;
       if (d.notas) t.notas = t.notas ? t.notas + '\n' + d.notas : d.notas;
-      if (t.status !== 'recebido' && d.status === 'recebido') { t.status = 'recebido'; t.recebido = d.recebido; t.rep = d.rep; }
+      // os pagamentos e as linhas da planilha das duas fichas ficam juntos; o valor devido de uma completa o da outra
+      if ((d.pagamentos || []).length) t.pagamentos = [...(t.pagamentos || []), ...d.pagamentos];
+      if ((d.rep || []).length) t.rep = [...(t.rep || []), ...d.rep];
+      if (t.devido == null && d.devido != null) { t.devido = d.devido; t.devidoOrigem = d.devidoOrigem; }
+      else if (t.devidoOrigem === 'repasse' && d.devidoOrigem === 'repasse' && d.devido != null) t.devido = C.round2(t.devido + d.devido);
       t.updatedAt = t.editadaEm = Date.now();
       // numa operação só: a ficha de destino guarda tudo, esta sai, e a mensagem dela passa a ser ignorada
       const ops = [{ s: 'records', put: t }, { s: 'records', del: d.id }, ignorar(d.key, 'juntada', d.photoIds)];
@@ -1290,14 +1420,30 @@
 
   // ================= pagamento recebido =================
   function sheetRecebi() {
-    const st = { valor: null, data: today(), fonte: '', sel: [], alloc: new Map() };
+    const st = { valor: null, data: today(), fonte: '', sel: [], alloc: new Map(), parte: false, falta: null };
     const fontes = uniq([...usedValues('cols'), ...usedValues('conv'), ...usedValues('hosp')]);
     const api = openSheet({ title: 'Pagamento recebido', render() {
-      const valIn = h('input', { id: 'pg-valor', type: 'text', inputmode: 'decimal', placeholder: '0,00', value: moneyInput(st.valor), oninput: (e) => { st.valor = parseMoney(e.target.value); realloc(); drawCands(); drawFoot(); } });
+      const valIn = h('input', { id: 'pg-valor', type: 'text', inputmode: 'decimal', placeholder: '0,00', value: moneyInput(st.valor), oninput: (e) => { st.valor = parseMoney(e.target.value); realloc(); drawCands(); drawFoot(); drawQuita(); } });
       const dateIn = h('input', { type: 'date', value: st.data, oninput: (e) => { st.data = e.target.value; } });
       const fonteSel = h('select', { onchange: (e) => { st.fonte = e.target.value; drawCands(); } }, h('option', { value: '' }, 'Qualquer um'), fontes.map((f) => h('option', { value: f, selected: f === st.fonte }, f)));
       const cands = h('section', { class: 'sec' });
+      const quita = h('div', { id: 'pg-quita', style: 'padding:0 0 12px 46px' });   // aparece logo abaixo da cirurgia escolhida
       const footBtn = h('button', { class: 'btn primary', type: 'button', onclick: confirm }, 'Registrar');
+      // uma cirurgia só: sem valor devido, pergunta se o pagamento quita; com valor devido, mostra quanto ainda falta
+      function drawQuita() {
+        const r = st.sel.length === 1 ? S.records.find((x) => x.id === st.sel[0]) : null;
+        if (!r) { quita.replaceChildren(); return; }
+        const f = fin(r);
+        if (f.devido == null) {
+          const faltaIn = h('input', { id: 'pg-falta', type: 'text', inputmode: 'decimal', placeholder: 'Se souber', value: moneyInput(st.falta), oninput: (e) => { st.falta = parseMoney(e.target.value); } });
+          quita.replaceChildren(h('div', { class: 'form' }, h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Foi o valor todo dessa cirurgia?'),
+            seg([['tudo', 'Sim, tudo'], ['parte', 'Não, só uma parte']], st.parte ? 'parte' : 'tudo', (v) => { st.parte = v === 'parte'; drawQuita(); }, 'Foi o valor todo?')),
+            st.parte ? field('Quanto ainda falta (R$)', faltaIn, 'Se não souber, deixe em branco.') : null));
+        } else {
+          const falta = C.round2(f.devido - f.recebido - (st.valor || 0));
+          quita.replaceChildren(h('p', { class: 'note' }, falta > 0.004 ? `Depois deste pagamento, ainda faltam ${brl(falta)} dos ${brl(f.devido)} devidos.` : 'Com este pagamento, a cirurgia fica quitada.'));
+        }
+      }
       function realloc() {
         const sel = st.sel.map((id) => S.records.find((r) => r.id === id)).filter(Boolean);
         st.alloc.clear(); if (!sel.length || st.valor == null) return;
@@ -1311,7 +1457,8 @@
         const list = S.records.filter(isOpen).filter(match).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 60);
         const items = list.map((r) => {
           const on = st.sel.includes(r.id);
-          const row = recordItem(r, () => { st.sel = on ? st.sel.filter((x) => x !== r.id) : [...st.sel, r.id]; realloc(); drawCands(); drawFoot(); }, on);
+          const row = recordItem(r, () => { st.sel = on ? st.sel.filter((x) => x !== r.id) : [...st.sel, r.id]; realloc(); drawCands(); drawFoot(); drawQuita(); }, on);
+          if (on && st.sel.length === 1) return h('div', null, row, quita);
           return on && st.sel.length > 1 ? h('div', null, row, h('div', { class: 'row', style: 'padding:0 16px 12px 73px' }, h('span', { class: 'small muted' }, 'Desta:'),
             h('input', { type: 'text', inputmode: 'decimal', 'aria-label': 'Valor desta cirurgia', value: moneyInput(st.alloc.get(r.id)), style: 'max-width:150px;min-height:42px', oninput: (e) => { st.alloc.set(r.id, parseMoney(e.target.value)); drawFoot(); } }))) : row;
         });
@@ -1327,10 +1474,17 @@
       async function confirm() {
         const soma = [...st.alloc.values()].reduce((s, v) => s + (v || 0), 0);
         if (st.sel.length > 1 && Math.abs(soma - st.valor) > 0.009) { toast(`A soma (${brl(soma)}) está diferente do valor recebido (${brl(st.valor)}).`); return; }
-        for (const id of st.sel) { const r = S.records.find((x) => x.id === id); if (!r) continue; r.status = 'recebido'; r.recebido = { valor: st.sel.length === 1 ? st.valor : st.alloc.get(id), data: st.data || today(), origem: 'manual', fonte: st.fonte || null }; await saveRecord(r); }
+        const umaSo = st.sel.length === 1;
+        for (const id of st.sel) {
+          const r = S.records.find((x) => x.id === id); if (!r) continue;
+          const parte = umaSo && st.parte && r.devido == null;
+          r.pagamentos = [...(r.pagamentos || []), { id: C.uid('g'), valor: umaSo ? st.valor : st.alloc.get(id), data: st.data || today(), origem: 'manual', fonte: st.fonte || null, parcial: parte || undefined }];
+          if (parte && st.falta > 0) { r.devido = C.round2(C.totalRecebido(r) + st.falta); r.devidoOrigem = 'combinado'; }
+          await saveRecord(r);
+        }
         derive(); render(); api.close(true); toast('Pagamento registrado.');
       }
-      drawCands(); drawFoot();
+      drawCands(); drawFoot(); drawQuita();
       return { body: [h('div', { class: 'form' }, h('div', { class: 'grid2' }, field('Quanto caiu (R$)', valIn), field('Quando', dateIn)), field('Quem pagou', fonteSel, 'Mostra só as cirurgias dessa pessoa, convênio ou hospital.')), cands], foot: footBtn };
     } });
     return api;
@@ -1489,26 +1643,27 @@
     return openSheet({ title: 'Planilhas de repasse', back: true, render(api) {
       if (!S.repasses.length) return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('sheet')), h('p', null, 'Nenhuma planilha importada ainda.'))], foot: h('button', { class: 'btn primary', type: 'button', onclick: pickFile }, 'Abrir uma planilha') };
       const reps = [...S.repasses].sort((a, b) => (b.importedAt || 0) - (a.importedAt || 0));
+      // quanto caiu de fato na conta (item 26): opcional, pode ser anotado depois, olhando o extrato
+      const caiu = async (d) => {
+        const v = await formDialog({ title: 'Quanto caiu na conta?', text: `A planilha liberou ${brl(d.total)}. Coloque o valor que entrou no banco, para o "Recebido no mês" bater com o extrato. Em branco, vale o liberado.`, fields: [{ id: 'v', label: 'Valor (R$)', inputmode: 'decimal', value: moneyInput(d.caiu), placeholder: moneyInput(d.total) }] });
+        if (!v) return;
+        d.caiu = parseMoney(v.v); await Store.put('repasses', d); render(); api.update(); toast('Valor guardado.');
+      };
+      const sub = (d) => { const dif = d.caiu != null ? C.round2(d.total - d.caiu) : 0;
+        return `${brl(d.total)} liberados, ${plural(d.n, 'linha', 'linhas')}, pago em ${ddmmyyyy(d.pay)}` + (d.caiu == null ? '' : `. Caiu ${brl(d.caiu)}${Math.abs(dif) >= 0.005 ? ` (${dif > 0 ? brl(dif) + ' a menos' : brl(-dif) + ' a mais'})` : ''}`); };
       return { body: [h('div', { class: 'group' }, reps.map((d) => h('div', { class: 'rowbtn' }, h('span', { class: 'bubble' }, icon('sheet')),
-        h('span', { class: 't' }, d.numero ? 'Repasse nº ' + d.numero : d.nome || 'Repasse', h('small', null, `${brl(d.total)}, ${plural(d.n, 'linha', 'linhas')}, pago em ${ddmmyyyy(d.pay)}`)),
-        h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (await undoRepasse(d, true)) api.update(); } }, 'Desfazer'))))] };
+        h('span', { class: 't' }, d.numero ? 'Repasse nº ' + d.numero : d.nome || 'Repasse', h('small', null, sub(d)),
+          h('span', { class: 'row', style: 'gap:8px;margin-top:10px' }, h('button', { class: 'btn sm', type: 'button', onclick: () => caiu(d) }, 'Quanto caiu'),
+            h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (await undoRepasse(d, true)) api.update(); } }, 'Desfazer'))))))] };
     } });
   }
   async function undoRepasse(doc, ask) {
-    if (ask && !(await confirmDialog({ title: 'Desfazer esta planilha?', text: 'As cirurgias que ela marcou como pagas voltam para a receber, e as que ela criou são apagadas.', ok: 'Desfazer', danger: true }))) return false;
+    if (ask && !(await confirmDialog({ title: 'Desfazer esta planilha?', text: 'Os pagamentos dela saem das cirurgias. As que ela pagou voltam para a receber, e as que ela criou são apagadas.', ok: 'Desfazer', danger: true }))) return false;
     const criadas = [];
     for (const r of [...S.records]) {
-      if (!(r.recebido && r.recebido.repId === doc.id)) continue;
-      if (r.origem === 'repasse') criadas.push(r);
-      else {
-        r.status = 'aberto'; r.recebido = null; r.rep = [];
-        if (r.antesDaPlanilha) {
-          const ap = r.antesDaPlanilha; r.date = ap.date; r.time = ap.time;
-          r.revisar = uniq([...(r.revisar || []), ...(ap.avisos || [])]);
-          delete r.antesDaPlanilha; delete r.horaDaPlanilha;
-        }
-        await saveRecord(r, { sistema: true });
-      }
+      const res = C.desfazerRepasseNaFicha(r, doc.id);   // tira pagamento, linhas, valor devido e a data/hora dela
+      if (res === 'apagar') criadas.push(r);
+      else if (res === 'mudou') await saveRecord(r, { sistema: true });
     }
     await apagarFichasDeVez(criadas);
     S.repasses = S.repasses.filter((x) => x.id !== doc.id); await Store.del('repasses', doc.id);
@@ -1698,7 +1853,7 @@
         const r = S.records[i];
         const novo = C.recordFromEntry(e, S.index, { chatName: chat.chatName, feriados: S.hol });
         const upd = { ...r, caption: novo.caption, legendaAnterior: r.caption, chavesAntigas: uniq([...(r.chavesAntigas || []), r.key]), key: e.key, updatedAt: Date.now() };
-        if (r.status === 'aberto' && !r.editadaEm) Object.assign(upd, { date: novo.date, time: novo.time, msgDate: novo.msgDate, msgTime: novo.msgTime, procs: novo.procs, hosp: novo.hosp, cols: novo.cols, conv: novo.conv, valorPrevisto: novo.valorPrevisto, notas: novo.notas, revisar: novo.revisar, omitted: novo.omitted });
+        if (sit(r) === 'aberto' && !r.editadaEm) Object.assign(upd, { date: novo.date, time: novo.time, msgDate: novo.msgDate, msgTime: novo.msgTime, procs: novo.procs, hosp: novo.hosp, cols: novo.cols, conv: novo.conv, valorPrevisto: novo.valorPrevisto, devido: novo.devido, devidoOrigem: novo.devidoOrigem, notas: novo.notas, revisar: novo.revisar, omitted: novo.omitted });
         else upd.revisar = uniq([...(r.revisar || []), 'Legenda editada']);
         if (precisaFotos(r, e)) {
           const novas = []; for (const nm of e.photos) { const id = await one(nm); if (id) novas.push(id); }
@@ -1810,7 +1965,7 @@
     clearDemo();
     for (const s of sheets.slice()) s.close(true);
     const hosps = uniq([...usedValues('hosp'), ...namesOf('hosp')]);
-    const st = { step: S.repasses.some((x) => x.id === rep.id) ? 'repetido' : 'plano', hosp: S.settings.hospRepasse || (hosps.includes('UMC') ? 'UMC' : hosps[0] || ''), quando: 'hoje', pay: today(), over: new Map(), unlink: new Set() };
+    const st = { step: S.repasses.some((x) => x.id === rep.id) ? 'repetido' : 'plano', hosp: S.settings.hospRepasse || (hosps.includes('UMC') ? 'UMC' : hosps[0] || ''), quando: 'hoje', pay: today(), over: new Map(), ligar: new Map(), separar: new Set(), mesmo: new Map(), caiu: null };
     const execs = uniq(rep.lines.map((l) => l.exec));
     const colNames = namesOf('col');
     // nome completo com o mesmo primeiro nome de um colega: pergunta. Se o colega já tem outro nome completo, o app parte
@@ -1835,7 +1990,8 @@
       return C.buildIndex(terms);
     };
     let acts = [];
-    const replan = () => { acts = C.planRepasse(rep, S.records, tempIndex(), { hosp: st.hosp || null }); };
+    // ligar: linhas ligadas à mão (ou marcadas como cirurgia nova); separar: atos que ela separou, uma cirurgia por linha
+    const replan = () => { acts = C.planRepasse(rep, S.records, tempIndex(), { hosp: st.hosp || null, ligar: st.ligar, separar: st.separar, mesmo: st.mesmo }); };
     replan();
     const colName = (a) => { const o = st.over.get(a.exec); return o ? (o.col === '__novo__' ? o.novo : o.col) : ''; };
     const api = openSheet({ title: 'Planilha de repasse', render(api) {
@@ -1846,26 +2002,67 @@
       }
       if (st.step === 'pronto') {
         return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${brl(rep.total)} registrados.`),
-          h('p', null, cap([st.res.matched ? `${plural(st.res.matched, 'cirurgia do WhatsApp ficou paga', 'cirurgias do WhatsApp ficaram pagas')}` : null, st.res.created ? `${plural(st.res.created, 'cirurgia nova', 'cirurgias novas')}, que não estavam no WhatsApp` : null].filter(Boolean).join(' e ')) + '.')),
+          h('p', null, cap(frase([st.res.matched ? plural(st.res.matched, 'cirurgia do WhatsApp ficou paga', 'cirurgias do WhatsApp ficaram pagas') : null,
+            st.res.complementos ? plural(st.res.complementos, 'complemento somado a uma cirurgia já paga', 'complementos somados a cirurgias já pagas') : null,
+            st.res.mesmos ? plural(st.res.mesmos, 'pagamento que você tinha registrado agora consta da planilha', 'pagamentos que você tinha registrado agora constam da planilha') : null,
+            st.res.created ? `${plural(st.res.created, 'cirurgia nova', 'cirurgias novas')}, que não estavam no WhatsApp` : null])) + '.'),
+          st.res.dif ? h('p', { class: 'note' }, st.res.dif) : null),
           !PREVIEW ? tip('Faça um backup agora', ' Assim os pagamentos desta planilha ficam guardados fora do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null],
           foot: h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', { status: 'recebido' }); } }, 'Ver cirurgias pagas') };
       }
-      const matched = acts.filter((a) => a.recordId && !st.unlink.has(a.recordId));
-      const fresh = acts.filter((a) => !a.recordId || st.unlink.has(a.recordId));
+      // Revisão antes de gravar (item 25): o que casou com segurança, o que precisa conferir (outra candidata, complemento,
+      // data ou valor diferente, certeza baixa) e o que entra como cirurgia nova, com ligar à mão e separar.
+      const assoc = acts.filter((a) => a.recordId);
+      const novas = acts.filter((a) => !a.recordId);
+      const conferir = assoc.filter((a) => a.certeza !== 'manual' && (a.certeza === 'confira' || a.certeza === 'complemento' || a.outras.length || a.difData || a.difValor != null));
+      const seguras = assoc.filter((a) => !conferir.includes(a));
       const doubtful = execs.filter((ex) => { const o = st.over.get(ex); return o.how === 'parecido' || o.how === 'primeiro-nome' || o.how === 'novo' || o.forced; });
       const payIn = h('input', { type: 'date', value: st.pay, 'aria-label': 'Dia em que o dinheiro caiu', oninput: (e) => { st.pay = e.target.value; } });
+      const difTxt = () => { const d = st.caiu != null ? C.round2(rep.total - st.caiu) : null;
+        return d == null ? 'Opcional. Com ele, o "Recebido no mês" bate com o extrato do banco.' : Math.abs(d) < 0.005 ? 'Igual ao liberado na planilha.' : d > 0 ? `${brl(d)} a menos que o liberado: retenções e taxas.` : `${brl(-d)} a mais que o liberado.`; };
+      const difEl = h('small', { id: 'rep-caiu-dif' }, difTxt());
+      const caiuIn = h('input', { id: 'rep-caiu', type: 'text', inputmode: 'decimal', placeholder: moneyInput(rep.total), value: moneyInput(st.caiu), 'aria-label': 'Quanto caiu na conta', oninput: (e) => { st.caiu = parseMoney(e.target.value); difEl.textContent = difTxt(); } });
       const smallLink = (label, fn) => h('button', { class: 'link', type: 'button', style: 'padding:2px 0;font-size:14px', onclick: fn }, label);
-      const actLine = (a, r) => h('div', { class: 'ritem', style: 'cursor:default' }, dateBadge(a),
-        h('span', { class: 'rmain' }, h('span', { class: 'p' }, a.procNames.join(' + ')),
-          h('span', { class: 'm' }, r ? `No app: ${dataLonga(r.date, { semDia: true })}${r.time ? ', ' + horaTxt(r.time) : ''}, ${ondeCom(r) || procText(r)}` : [st.hosp, colName(a) ? 'com ' + colName(a) : ''].filter(Boolean).join(', ')),
-          r ? h('span', { class: 'row', style: 'gap:12px' }, a.certeza === 'confira' ? h('span', { class: 'st warn' }, 'confira') : h('span', { class: 'st ok' }, 'mesmo dia e colega'), smallLink('Não é esta', () => { st.unlink.add(a.recordId); api.update(); }))
-            : (st.unlink.has(a.recordId) ? smallLink('Voltar a ligar', () => { st.unlink.delete(a.recordId); api.update(); }) : null)),
-        h('span', { class: 'rside' }, h('span', { class: 'val' }, brl0(a.valor))));
+      const mexer = (fn) => () => { fn(); replan(); api.update(); };
+      const porPerto = (a) => S.records.filter((r) => Math.abs(C.dayNum(r.date) - C.dayNum(a.date)) <= 1).sort((x, y) => Math.abs(C.dayNum(x.date) - C.dayNum(a.date)) - Math.abs(C.dayNum(y.date) - C.dayNum(a.date)));
+      const escolher = (a) => sheetPick('Qual é a cirurgia desta linha?', porPerto(a), async (r) => { st.ligar.set(a.key, r.id); replan(); api.update(); });
+      const baseKey = (a) => a.key.replace(/#\d+$/, '');
+      const actLine = (a) => {
+        const r = a.recordId ? S.records.find((x) => x.id === a.recordId) : null;
+        const avisos = [];
+        if (a.complemento) { const f = fin(r);
+          avisos.push(a.mesmo ? `Você já tinha registrado este pagamento${f.semValorAnotado ? '' : ` (${brl(f.recebido)})`}. A planilha passa a ser o registro dele, sem somar.`
+            : `Esta cirurgia já foi paga (${brl(f.recebido)}). O valor desta linha soma a ela, como complemento.`); }
+        if (a.outras.length) avisos.push(a.outras.length === 1 ? 'Há outra cirurgia parecida perto dessa data.' : `Há outras ${a.outras.length} cirurgias parecidas perto dessa data.`);
+        if (a.certeza === 'confira') avisos.push('Confira se é a mesma cirurgia.');
+        if (a.difData) avisos.push(`No app está em ${ddmmyyyy(a.difData)}; vale a data da planilha.`);
+        if (a.difValor != null) avisos.push(`O valor combinado era ${brl(a.difValor)}; a planilha paga ${brl(a.valor)}.`);
+        if (a.separadoSozinho) avisos.push('Sem hora na planilha: o app separou porque há uma cirurgia para cada linha.');
+        const links = [];
+        if (r) {
+          if (a.podeSerMesmo) links.push(smallLink(a.mesmo ? 'É um complemento' : 'É o mesmo pagamento', mexer(() => st.mesmo.set(a.key, !a.mesmo))));
+          links.push(smallLink(a.complemento ? 'É outra cirurgia' : 'Não é esta', mexer(() => st.ligar.set(a.key, null))));
+          if (porPerto(a).length > 1) links.push(smallLink('Trocar', () => escolher(a)));
+        } else {
+          if (porPerto(a).length) links.push(smallLink('Ligar a uma cirurgia', () => escolher(a)));
+          if (a.manual) links.push(smallLink('Desfazer', mexer(() => st.ligar.delete(a.key))));
+        }
+        if (a.lines.length > 1 && !a.time) links.push(smallLink(`Separar em ${a.lines.length}`, mexer(() => { st.separar.add(a.key); st.ligar.delete(a.key); })));
+        if (a.separado && st.separar.has(baseKey(a))) links.push(smallLink('Juntar de novo', mexer(() => st.separar.delete(baseKey(a)))));
+        return h('div', { class: 'ritem rv', 'data-ato': a.key }, dateBadge(a),
+          h('span', { class: 'rmain' }, h('span', { class: 'p' }, a.procNames.join(' + ')),
+            h('span', { class: 'm' }, r ? `No app: ${dataLonga(r.date, { semDia: true })}${r.time ? ', ' + horaTxt(r.time) : ''}, ${ondeCom(r) || procText(r)}` : [st.hosp, colName(a) ? 'com ' + colName(a) : ''].filter(Boolean).join(', ')),
+            avisos.length ? h('span', { class: 'm warn-txt' }, avisos.join(' ')) : null,
+            h('span', { class: 'row', style: 'gap:14px;flex-wrap:wrap' }, r && !avisos.length ? h('span', { class: 'st ok' }, a.certeza === 'manual' ? 'ligada por você' : 'mesmo dia e colega') : null, ...links)),
+          h('span', { class: 'rside' }, h('span', { class: 'val' }, brl0(a.valor))));
+      };
+      const sec = (titulo, nota, lista, id) => h('section', { class: 'sec', id }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, titulo)), nota ? h('p', { class: 'note' }, nota) : null, lista.length ? h('div', { class: 'group' }, lista.map(actLine)) : null);
       const body = [
         h('div', null, h('h1', { class: 'bigtitle' }, brl(rep.total)), h('p', { class: 'muted', style: 'margin-top:6px' }, [plural(rep.lines.length, 'linha', 'linhas') + ' na planilha', rep.numero ? 'repasse nº ' + rep.numero : null, compName(rep.comp) || null].filter(Boolean).join(', '))),
         h('div', { class: 'group' },
           h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quando esse dinheiro caiu na sua conta?', h('small', null, 'Nas planilhas antigas, escolha o dia certo.')),
             seg([['hoje', 'Hoje'], ['outro', 'Outro dia']], st.quando, (v) => { st.quando = v; if (v === 'hoje') st.pay = today(); api.update(); }, 'Quando'), st.quando === 'outro' ? payIn : null),
+          h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quanto caiu na conta?', difEl), caiuIn),
           h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'De qual hospital é a planilha?'),
             h('div', { class: 'qchips' }, [...hosps.slice(0, 5), ''].map((x) => h('button', { class: 'qchip', type: 'button', 'aria-pressed': String(st.hosp === x), onclick: () => { st.hosp = x; replan(); api.update(); } }, x || 'Não sei'))))),
         doubtful.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Confirme os nomes')), h('div', { class: 'group' }, doubtful.map((ex) => { const o = st.over.get(ex);
@@ -1876,12 +2073,9 @@
             : o.col === '__novo__' ? (o.suspeita && !o.forced ? `Tem o mesmo primeiro nome de ${o.suspeita}, mas parece outra pessoa. Vai entrar como colega novo; se for ${o.suspeita}, escolha abaixo.` : 'Vai entrar como colega novo.') : `Ligado a ${o.col}.`;
           return h('div', { class: 'qrow' }, h('div', { class: 'q' }, ex, h('small', null, sub)),
             pergunta ? seg([['sim', 'Sim'], ['nao', 'Não, é outra pessoa']], 'sim', (v) => { if (v === 'nao') { st.over.set(ex, { col: '__novo__', how: 'novo', novo: firstName(ex, colNames), forced: true }); replan(); api.update(); } }, 'É a mesma pessoa?') : pickSel); }))) : null,
-        h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Já estavam no app')),
-          h('p', { class: 'note' }, matched.length ? `Vão ficar como pagas (${matched.length}).` : 'Nenhuma cirurgia a receber do WhatsApp aparece nesta planilha.'),
-          matched.length ? h('div', { class: 'group' }, matched.map((a) => actLine(a, S.records.find((x) => x.id === a.recordId)))) : null),
-        fresh.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Não estavam no WhatsApp')),
-          h('p', { class: 'note' }, `Entram como cirurgias novas, já pagas (${fresh.length}). Por exemplo, as que colocaram seu nome sem avisar.`),
-          h('div', { class: 'group' }, fresh.map((a) => actLine(a, null)))) : null];
+        conferir.length ? sec('Confira', `O app não tem certeza ${conferir.length === 1 ? 'desta linha' : `destas ${conferir.length} linhas`}. Se estiver certo, não precisa fazer nada.`, conferir, 'rep-conferir') : null,
+        sec('Já estavam no app', seguras.length ? `Vão ficar como pagas (${seguras.length}).` : conferir.length ? null : 'Nenhuma cirurgia a receber do WhatsApp aparece nesta planilha.', seguras, 'rep-seguras'),
+        novas.length ? sec('Não estavam no app', `Entram como cirurgias novas, já pagas (${novas.length}). Por exemplo, as que colocaram seu nome sem avisar.${novas.some((a) => porPerto(a).length) ? ' Se uma delas já estiver no app, toque em Ligar.' : ''}`, novas, 'rep-novas') : null];
       return { body, foot: h('button', { class: 'btn primary', type: 'button', onclick: () => apply(api) }, 'Confirmar') };
     } });
     async function apply(api) {
@@ -1900,36 +2094,43 @@
         if (l.conv && !S.terms.some((t) => t.type === 'conv' && C.norm(t.name) === C.norm(l.conv)) && !termsAdd.some((t) => t.type === 'conv' && C.norm(t.name) === C.norm(l.conv))) termsAdd.push({ id: C.uid('t'), type: 'conv', name: l.conv, aliases: [C.norm(l.conv)] });
       }
       S.terms.push(...termsAdd); await Store.putMany('terms', [...termsAdd, ...termsUpd]); derive();
-      const changed = []; let matched = 0, created = 0;
+      const changed = []; let matched = 0, complementos = 0, mesmos = 0, created = 0;
       for (const a of acts) {
         const lines = a.lines.map((l) => { const t = C.mapRepasseProc(l.proc, S.index); const procName = t ? t.name : C.sentenceCase(l.proc); return { date: l.date, time: l.time, valor: l.valor, conv: l.conv, cod: l.cod, proc: l.proc, procName, fam: C.famOf(S.index, procName), funcao: l.funcao, exec: l.exec, repId: rep.id }; });
         const col = colName(a) || null;
-        const pay = { valor: a.valor, data: st.pay || today(), origem: 'repasse', repId: rep.id };
-        const r = a.recordId && !st.unlink.has(a.recordId) ? S.records.find((x) => x.id === a.recordId) : null;
+        const pag = { id: C.uid('g'), valor: a.valor, data: st.pay || today(), origem: 'repasse', repId: rep.id };
+        const r = a.recordId ? S.records.find((x) => x.id === a.recordId) : null;
         if (r) {
-          r.status = 'recebido'; r.recebido = pay; r.rep = lines;
-          if (!r.conv) r.conv = lines[0].conv; if (!r.funcao) r.funcao = lines[0].funcao;
-          // a planilha é o registro do ato: valem a data e a hora dela (a de antes fica guardada para desfazer)
-          const saem = (r.revisar || []).filter((f) => f === 'Confira a data' || (a.time && f === 'Confira a hora'));
-          if (r.date !== a.date || (a.time && r.time !== a.time) || saem.length) { if (!r.antesDaPlanilha) r.antesDaPlanilha = { date: r.date, time: r.time, avisos: saem }; r.horaDaPlanilha = true; }
-          r.date = a.date; if (a.time) r.time = a.time;
-          r.revisar = (r.revisar || []).filter((f) => !saem.includes(f));
-          if (!(r.cols || []).length && col) r.cols = [col]; if (!r.procs.length) r.procs = uniq(lines.map((l) => l.procName));
-          if (!r.hosp && st.hosp) r.hosp = st.hosp;
-          r.revisar = (r.revisar || []).filter((f) => f !== 'Sem procedimento'); r.updatedAt = Date.now();
-          changed.push(r); matched++;
+          const complemento = !isOpen(r);   // já paga: o valor soma a ela (complemento) ou é o mesmo pagamento, sem mexer no resto
+          if (!complemento) {
+            if (!r.conv) r.conv = lines[0].conv; if (!r.funcao) r.funcao = lines[0].funcao;
+            // a planilha é o registro do ato: valem a data e a hora dela (a de antes fica guardada para desfazer)
+            const saem = (r.revisar || []).filter((f) => f === 'Confira a data' || (a.time && f === 'Confira a hora'));
+            if (r.date !== a.date || (a.time && r.time !== a.time) || saem.length) { if (!r.antesDaPlanilha) r.antesDaPlanilha = { date: r.date, time: r.time, avisos: saem }; r.horaDaPlanilha = true; }
+            r.date = a.date; if (a.time) r.time = a.time;
+            r.revisar = (r.revisar || []).filter((f) => !saem.includes(f));
+            if (!(r.cols || []).length && col) r.cols = [col]; if (!r.procs.length) r.procs = uniq(lines.map((l) => l.procName));
+            if (!r.hosp && st.hosp) r.hosp = st.hosp;
+            r.revisar = (r.revisar || []).filter((f) => f !== 'Sem procedimento');
+          }
+          const mesmo = complemento && a.mesmo;
+          C.pagarPeloRepasse(r, a, lines, pag, { substituir: mesmo }); r.updatedAt = Date.now();
+          changed.push(r); if (mesmo) mesmos++; else if (complemento) complementos++; else matched++;
         } else {
           S.settings.seq += 1;
-          const nr = newRecord({ num: S.settings.seq, origem: 'repasse', date: a.date, time: a.time, procs: uniq(lines.map((l) => l.procName)), hosp: st.hosp || null, cols: col ? [col] : [], conv: lines[0].conv, funcao: lines[0].funcao, status: 'recebido', recebido: pay, rep: lines });
+          const nr = newRecord({ num: S.settings.seq, origem: 'repasse', repCriador: rep.id, date: a.date, time: a.time, procs: uniq(lines.map((l) => l.procName)), hosp: st.hosp || null, cols: col ? [col] : [], conv: lines[0].conv, funcao: lines[0].funcao });
+          C.pagarPeloRepasse(nr, a, lines, pag);
           S.records.push(nr); changed.push(nr); created++;
         }
       }
       await Store.putMany('records', changed);
-      const doc = { id: rep.id, numero: rep.numero, comp: rep.comp, nome: rep.nome, total: rep.total, n: rep.lines.length, hosp: st.hosp || null, pay: st.pay || today(), importedAt: Date.now() };
+      const doc = { id: rep.id, numero: rep.numero, comp: rep.comp, nome: rep.nome, total: rep.total, n: rep.lines.length, hosp: st.hosp || null, pay: st.pay || today(), importedAt: Date.now(), caiu: st.caiu != null ? st.caiu : null };
       S.repasses.push(doc); await Store.put('repasses', doc);
       S.settings.hospRepasse = st.hosp || S.settings.hospRepasse; await saveSettings(); persistStorage();
       derive(); render();
-      st.res = { matched, created }; st.step = 'pronto'; api.update();
+      const dif = doc.caiu != null ? C.round2(doc.total - doc.caiu) : 0;
+      st.res = { matched, complementos, mesmos, created, dif: Math.abs(dif) >= 0.005 ? `Caíram ${brl(doc.caiu)} na conta, ${dif > 0 ? brl(dif) + ' a menos' : brl(-dif) + ' a mais'} que o liberado.` : null };
+      st.step = 'pronto'; api.update();
     }
   }
 
@@ -2136,9 +2337,12 @@
     const head = ['Nº', 'Data', 'Hora', 'Urgência', 'Procedimentos', 'Hospital', 'Colegas', 'Função', 'Convênio', 'Situação', 'Valor recebido', 'Data do pagamento', 'Valor a receber (aprox.)', 'Origem', 'Repasse', 'Fotos', 'Legenda'];
     const money = (v) => (v == null ? '' : nf2.format(v).replace(/\./g, ''));
     const rows = [...S.records].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).map((r) => {
-      const v = valueOf(r); const rp = r.recebido || {};
-      return [r.num || '', ddmmyyyy(r.date), r.time || '', urgOf(r) ? 'sim' : '', procText(r), r.hosp || '', (r.cols || []).join(', '), r.funcao || '', r.conv || '', { aberto: 'A receber', recebido: 'Recebida', semcobranca: 'Sem cobrança' }[r.status],
-        r.status === 'recebido' ? money(rp.valor) : '', rp.data ? ddmmyyyy(rp.data) : '', isOpen(r) ? money(v.v) : '', r.origem, (S.repasses.find((x) => x.id === rp.repId) || {}).numero || '', (r.photoIds || []).length, (r.caption || '').replace(/\s+/g, ' ')];
+      // as mesmas colunas de antes: valor recebido é a soma dos pagamentos (também da cirurgia paga em parte), e a data é
+      // a do último pagamento
+      const v = valueOf(r); const f = fin(r); const ult = f.pg[f.pg.length - 1] || {};
+      const reps = uniq(f.pg.filter((p) => p.origem === 'repasse').map((p) => (S.repasses.find((x) => x.id === p.repId) || {}).numero).filter(Boolean)).join(', ');
+      return [r.num || '', ddmmyyyy(r.date), r.time || '', urgOf(r) ? 'sim' : '', procText(r), r.hosp || '', (r.cols || []).join(', '), r.funcao || '', r.conv || '', { aberto: 'A receber', parcial: 'Parcial', recebido: 'Recebida', semcobranca: 'Sem cobrança' }[f.s],
+        f.pg.length && !f.semValorAnotado ? money(f.recebido) : '', ult.data ? ddmmyyyy(ult.data) : '', isOpen(r) ? money(v.v) : '', r.origem, reps, (r.photoIds || []).length, (r.caption || '').replace(/\s+/g, ' ')];
     });
     const text = '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
     await offerFile(new Blob([text], { type: 'text/csv;charset=utf-8' }), `cirurgias-${today()}.csv`, 'text/csv', 'Planilha pronta', `${plural(rows.length, 'cirurgia', 'cirurgias')}. Abre no Excel, no Numbers e no Google Planilhas.`);
@@ -2184,7 +2388,7 @@
       `Versão do app ${VERSION}; versão dos dados ${S.settings.dataVersion || 0} (esperada ${DATA_VERSION})${S.dadosNovos ? '; os dados são de uma versão mais nova do app' : ''}`,
       `Onde: ${onde}`,
       `Armazenamento: ${S.storage === 'idb' ? 'banco do aparelho' : 'só na memória, nada é salvo'}; ${espaco}`,
-      `Cirurgias: ${S.records.length} (a receber ${n(isOpen)}, recebidas ${n((r) => r.status === 'recebido')}, sem cobrança ${n((r) => r.status === 'semcobranca')}, para completar ${n(needsReview)})`,
+      `Cirurgias: ${S.records.length} (a receber ${n((r) => sit(r) === 'aberto')}, pagas em parte ${n((r) => sit(r) === 'parcial')}, recebidas ${n(isPaid)}, sem cobrança ${n((r) => sit(r) === 'semcobranca')}, para completar ${n(needsReview)})`,
       `Fotos guardadas: ${nFotos} (miniaturas: ${nMinis}); fotos sem legenda: ${S.loose.length}`,
       `Nomes e abreviações: ${S.terms.length}; planilhas de repasse: ${S.repasses.length}; conversas importadas: ${S.imports.length}${paradas ? ` (${paradas} sem terminar)` : ''}`,
       `Lixeira: ${S.trash.length}; mensagens ignoradas: ${S.ignored.size}`,
@@ -2306,6 +2510,7 @@
     });
     recs.push(newRecord({ num: ++num, origem: 'whatsapp', date: day(3), time: '17:50', procs: [], hosp: HC, cols: [A], caption: '(exemplo sem procedimento)', revisar: ['Sem procedimento'], demo: true }));
     recs.push(newRecord({ num: ++num, origem: 'whatsapp', date: day(8), time: '12:30', procs: [hern], hosp: null, cols: [P], caption: 'Hérnia - Prado (exemplo sem hospital)', demo: true }));
+    for (const r of recs) { delete r.pagamentos; C.migrarFinanceiro(r); C.compatFinanceiro(r); }
     S.terms.push(...terms); S.records.push(...recs);
     S.repasses.push({ id: 'repdemo', numero: '000123', comp: 'exemplo', nome: 'Repasse de exemplo', total: C.round2(total), n: nLines, hosp: HC, pay: day(70), importedAt: Date.now(), demo: true });
     S.settings.seq = num; S.demo = true; derive();

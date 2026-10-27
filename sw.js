@@ -4,7 +4,7 @@
    sem internet, abre a cópia. Assim a página e o código nunca ficam de versões diferentes. Ícones: a cópia guardada.
    Qualquer outra página do mesmo endereço (testes, versões antigas, documentos) vai direto à internet e não é guardada,
    para nunca tomar o lugar do app na cópia usada sem internet. Desde a 1.7, nada vem de outro site (nem a fonte). */
-const CACHE = 'cirurgias-1.8';
+const CACHE = 'cirurgias-1.9';
 const APP_FILES = ['index.html', 'style.css', 'core.js', 'ui.js', 'manifest.webmanifest'];
 const ICONS = ['icon-180.png', 'icon-192.png', 'icon-512.png'];
 const SCOPE = new URL('./', self.location).pathname;  // a pasta do app, por exemplo /Carol_Controlecirurgias/

@@ -414,6 +414,7 @@
       msgDate: e.date, msgTime: e.time,
       procs: p.procs.slice(), hosp: p.hosp, cols: p.cols.slice(), conv: p.conv, funcao: null,
       valorPrevisto: p.valor, status: 'aberto', recebido: null, rep: [],
+      devido: p.valor != null ? p.valor : null, devidoOrigem: p.valor != null ? 'combinado' : null, pagamentos: [],
       caption: e.caption, notas: '', photoIds: [], photoNames: e.photos.slice(), omitted: e.omitted || 0,
       revisar: [], createdAt: Date.now(), updatedAt: Date.now(),
     };
@@ -675,14 +676,20 @@
   }
 
   // ---------- cruzamento repasse x cirurgias ----------
-  function groupActs(lines) {
+  // Um ato = linhas do mesmo dia, hora e médico executor. separar: chaves de atos que viram um ato por linha.
+  function groupActs(lines, separar) {
     const acts = new Map();
     for (const l of lines) {
       const k = `${l.date}|${l.time || ''}|${norm(l.exec || '')}`;
-      if (!acts.has(k)) acts.set(k, { date: l.date, time: l.time, exec: l.exec, lines: [] });
+      if (!acts.has(k)) acts.set(k, { key: k, date: l.date, time: l.time, exec: l.exec, lines: [] });
       acts.get(k).lines.push(l);
     }
-    return [...acts.values()];
+    const out = [];
+    for (const a of acts.values()) {
+      if (a.lines.length > 1 && separar && separar.has(a.key)) a.lines.forEach((l, i) => out.push({ ...a, key: a.key + '#' + i, lines: [l], separado: true }));
+      else out.push(a);
+    }
+    return out;
   }
   // Para casar a planilha com as fichas, a hora do envio ainda ajuda como pista (a ordem das mensagens segue a ordem das
   // cirurgias), mesmo sem valer como hora da cirurgia.
@@ -706,37 +713,245 @@
     if (ctx.hosp && rec.hosp && rec.hosp !== ctx.hosp) s -= 3;
     return s;
   }
-  /** Propõe pares ato-do-repasse ↔ cirurgia em aberto. Não grava nada. */
+  /** Propõe pares ato-do-repasse ↔ cirurgia. Não grava nada.
+   *  1ª rodada: cirurgias a receber (inclui as pagas em parte), como sempre. 2ª rodada: o que sobrou e casa muito bem
+   *  (mesmo dia, colega e procedimento) com uma cirurgia já paga vira proposta de complemento, em vez de cirurgia nova.
+   *  opts.ligar: Map chave do ato -> id da cirurgia (ligada à mão) ou null (cirurgia nova). opts.separar: chaves de atos
+   *  para separar, uma cirurgia por linha. Cada ato volta com certeza ('alta', 'confira', 'complemento', 'manual' ou
+   *  'novo'), outras (cirurgias parecidas, quando há mais de uma candidata) e as diferenças de data e de valor combinado. */
   function planRepasse(rep, records, index, opts) {
     opts = opts || {};
-    const acts = groupActs(rep.lines);
-    for (const a of acts) {
+    const prep = (a) => {
       const m = mapExecutor(a.exec, index);
       a.col = m ? m.term.name : null; a.colHow = m ? m.how : null;
       a.procNames = a.lines.map((l) => { const t = mapRepasseProc(l.proc, index); return t ? t.name : sentenceCase(l.proc); });
       a.valor = round2(a.lines.reduce((s, l) => s + l.valor, 0));
+      return a;
+    };
+    const abertas = records.filter(emAberto);
+    const pagas = records.filter((r) => situacao(r) === 'recebido');
+    // Sem hora na planilha, duas cirurgias do mesmo dia e colega viram um ato só. Quando o mesmo procedimento aparece
+    // mais de uma vez no ato e o app tem pelo menos essa quantidade de cirurgias dele naquele dia, são cirurgias diferentes.
+    const separar = new Set(opts.separar || []);
+    const auto = new Set();
+    for (const a of groupActs(rep.lines).map(prep)) {
+      if (a.time || a.lines.length < 2 || separar.has(a.key)) continue;
+      const cont = new Map(); for (const p of a.procNames) cont.set(p, (cont.get(p) || 0) + 1);
+      for (const [p, k] of cont) {
+        if (k < 2) continue;
+        const fam = famOf(index, p);
+        const doDia = abertas.filter((r) => r.date === a.date && (!a.col || !(r.cols || []).length || r.cols.includes(a.col)) && (r.procs || []).some((q) => q === p || famOf(index, q) === fam));
+        if (doDia.length >= k) { separar.add(a.key); auto.add(a.key); }
+      }
     }
-    const open = records.filter((r) => r.status === 'aberto');
-    const pairs = [];
-    acts.forEach((a, ai) => open.forEach((r) => { const sc = scorePair(a, r, { index, hosp: opts.hosp }); if (sc >= 5) pairs.push({ ai, r, sc }); }));
-    pairs.sort((x, y) => y.sc - x.sc || Math.abs(minutesOf(acts[x.ai].date, acts[x.ai].time) - minutesOf(x.r.date, horaPista(x.r))) - Math.abs(minutesOf(acts[y.ai].date, acts[y.ai].time) - minutesOf(y.r.date, horaPista(y.r))));
+    const acts = groupActs(rep.lines, separar).map(prep);
+    for (const a of acts) if (a.separado && auto.has(a.key.replace(/#\d+$/, ''))) a.separadoSozinho = true;
+    const ligar = opts.ligar || new Map();
     const usedA = new Set(), usedR = new Set();
-    for (const p of pairs) {
-      if (usedA.has(p.ai) || usedR.has(p.r.id)) continue;
-      usedA.add(p.ai); usedR.add(p.r.id);
-      acts[p.ai].recordId = p.r.id; acts[p.ai].score = p.sc; acts[p.ai].certeza = p.sc >= 9 ? 'alta' : 'confira';
-    }
-    for (const a of acts) if (!a.recordId) { a.recordId = null; a.certeza = 'novo'; }
+    acts.forEach((a, ai) => {
+      if (!ligar.has(a.key)) return;
+      usedA.add(ai); const id = ligar.get(a.key); const r = id ? records.find((x) => x.id === id) : null;
+      if (r && !usedR.has(r.id)) { usedR.add(r.id); a.recordId = r.id; a.certeza = 'manual'; a.complemento = !emAberto(r); }
+      else { a.recordId = null; a.certeza = 'novo'; a.manual = true; }
+    });
+    const scores = new Map();   // ato -> [{ r, sc }]
+    const parear = (cands, minimo, marcar) => {
+      const pairs = [];
+      acts.forEach((a, ai) => {
+        if (usedA.has(ai)) return;
+        for (const r of cands) {
+          const sc = scorePair(a, r, { index, hosp: opts.hosp });
+          if (sc < minimo) continue;
+          pairs.push({ ai, r, sc });
+          if (!scores.has(ai)) scores.set(ai, []); scores.get(ai).push({ r, sc });
+        }
+      });
+      pairs.sort((x, y) => y.sc - x.sc || Math.abs(minutesOf(acts[x.ai].date, acts[x.ai].time) - minutesOf(x.r.date, horaPista(x.r))) - Math.abs(minutesOf(acts[y.ai].date, acts[y.ai].time) - minutesOf(y.r.date, horaPista(y.r))));
+      for (const p of pairs) {
+        if (usedA.has(p.ai) || usedR.has(p.r.id)) continue;
+        usedA.add(p.ai); usedR.add(p.r.id);
+        const a = acts[p.ai]; a.recordId = p.r.id; a.score = p.sc; marcar(a, p);
+      }
+    };
+    parear(abertas, 5, (a, p) => { a.certeza = p.sc >= 9 ? 'alta' : 'confira'; });
+    parear(pagas, 9, (a) => { a.certeza = 'complemento'; a.complemento = true; });
+    const mesmo = opts.mesmo || new Map();
+    acts.forEach((a, ai) => {
+      if (!a.recordId) { a.recordId = null; if (!a.certeza) a.certeza = 'novo'; a.outras = []; return; }
+      const r = records.find((x) => x.id === a.recordId);
+      // Cirurgia já paga só com pagamento registrado por ela: a linha pode ser esse mesmo pagamento (não soma) ou um
+      // complemento (soma). Parte de "mesmo" quando o valor é igual ao que ela registrou ou quando ela não anotou o valor.
+      if (a.complemento) {
+        const pg = Array.isArray(r.pagamentos) ? r.pagamentos : [];
+        a.podeSerMesmo = pg.length > 0 && pg.every((p) => p.origem !== 'repasse');
+        a.mesmo = a.podeSerMesmo && (mesmo.has(a.key) ? !!mesmo.get(a.key) : pg.some((p) => p.valor == null) || Math.abs(totalRecebido(r) - a.valor) < 0.01);
+      }
+      a.outras = a.certeza === 'manual' ? [] : (scores.get(ai) || []).filter((x) => x.r.id !== a.recordId && x.sc >= Math.max(5, (a.score || 0) - 1)).map((x) => x.r.id);
+      a.difData = r.date !== a.date ? r.date : null;
+      a.difValor = r.devidoOrigem === 'combinado' && r.devido != null && Math.abs(r.devido - a.valor) > 0.009 ? r.devido : null;
+    });
     return acts;
   }
 
+  // ---------- modelo financeiro ----------
+  // Cada cirurgia guarda, separados: o valor devido (devido, com a origem: 'combinado' por ela ou 'repasse'; null = a
+  // definir) e a lista de pagamentos (valor, data e origem: 'manual' ou 'repasse', com o número da planilha). O total
+  // recebido, o saldo e a situação são calculados. status, recebido e valorPrevisto continuam gravados como espelho
+  // (compatFinanceiro), para a versão anterior do app ler os dados se for preciso voltar.
+  const totalRecebido = (r) => round2((r.pagamentos || []).reduce((s, p) => s + (p.valor || 0), 0));
+  /** Paga por inteiro? Pagamento sem valor anotado ("Já recebi" sem valor) conta como quitação. Com valor devido, quita
+   *  quando os pagamentos chegam nele; sem valor devido, quita, a não ser que o último pagamento seja só uma parte. */
+  function quitada(r) {
+    const pg = r.pagamentos || [];
+    if (!pg.length) return false;
+    if (pg.some((p) => p.valor == null)) return true;
+    if (r.devido != null) return r.devido - totalRecebido(r) < 0.005;
+    return !pg[pg.length - 1].parcial;
+  }
+  /** 'aberto' (a receber), 'parcial', 'recebido' ou 'semcobranca'. Ficha no formato antigo: pelo status. */
+  function situacao(r) {
+    if (r.status === 'semcobranca') return 'semcobranca';
+    if (!Array.isArray(r.pagamentos)) return r.status === 'recebido' ? 'recebido' : 'aberto';
+    if (!r.pagamentos.length) return 'aberto';
+    return quitada(r) ? 'recebido' : 'parcial';
+  }
+  const emAberto = (r) => { const s = situacao(r); return s === 'aberto' || s === 'parcial'; };
+  /** Do formato antigo (status + recebido + valorPrevisto) para o novo. Devolve true quando mudou alguma coisa.
+   *  Também acerta a ficha marcada como paga por uma versão antiga do app, depois de voltar de versão. */
+  function migrarFinanceiro(r) {
+    const rp = r.recebido;
+    const doAntigo = () => ({ id: uid('g'), valor: rp && rp.valor != null ? rp.valor : null, data: (rp && rp.data) || null,
+      origem: (rp && rp.origem) || 'manual', repId: (rp && rp.repId) || null, fonte: (rp && rp.fonte) || null });
+    if (!Array.isArray(r.pagamentos)) {
+      r.pagamentos = r.status === 'recebido' ? [doAntigo()] : [];
+      if (r.status === 'recebido' && rp && rp.origem === 'repasse' && rp.valor != null) {
+        r.devido = rp.valor; r.devidoOrigem = 'repasse';
+        if (r.valorPrevisto != null) r.devidoAntes = { valor: r.valorPrevisto, origem: 'combinado' };
+      } else if (r.status !== 'recebido' && r.valorPrevisto != null) { r.devido = r.valorPrevisto; r.devidoOrigem = 'combinado'; }
+      else { r.devido = null; r.devidoOrigem = null; }
+      if (r.origem === 'repasse' && rp && rp.repId && !r.repCriador) r.repCriador = rp.repId;
+      return true;
+    }
+    if (r.status === 'recebido' && !r.pagamentos.length && rp) { r.pagamentos.push(doAntigo()); return true; }
+    return false;
+  }
+  // assinatura do espelho: se a versão anterior do app mexer no dinheiro da ficha, ela deixa de bater
+  const assinatura = (r) => JSON.stringify([r.status || null, r.recebido ? [r.recebido.valor != null ? r.recebido.valor : null, r.recebido.data || null, r.recebido.origem || null, r.recebido.repId || null] : null, r.valorPrevisto != null ? r.valorPrevisto : null]);
+  /** Ao abrir o app: a ficha que a versão anterior mexeu (depois de voltar de versão) entra no modelo novo, sem perder o que
+   *  ela fez lá: marcou como recebida (o pagamento entra), desfez o pagamento ou a planilha (os pagamentos saem), corrigiu
+   *  o valor (fica o valor corrigido) ou mudou o valor combinado. Devolve true quando mudou alguma coisa. */
+  function reconciliarFinanceiro(r) {
+    if (!Array.isArray(r.pagamentos)) return migrarFinanceiro(r);
+    if (!r.espelho || r.espelho === assinatura(r)) return false;
+    let antes; try { antes = JSON.parse(r.espelho); } catch (e) { return false; }
+    const [stA, recA, vpA] = antes; const rp = r.recebido;
+    const doAntigo = () => ({ id: uid('g'), valor: rp && rp.valor != null ? rp.valor : null, data: (rp && rp.data) || null,
+      origem: (rp && rp.origem) || 'manual', repId: (rp && rp.repId) || null, fonte: (rp && rp.fonte) || null });
+    if (r.status === 'recebido' && stA !== 'recebido') r.pagamentos.push(doAntigo());           // marcada como recebida lá
+    else if (r.status !== 'recebido' && stA === 'recebido') {                                    // pagamento ou planilha desfeitos lá
+      r.pagamentos = []; delete r.substituidos;
+      if (r.devidoOrigem === 'repasse') { const ant = r.devidoAntes || {}; r.devido = ant.valor != null ? ant.valor : null; r.devidoOrigem = ant.origem || null; delete r.devidoAntes; }
+    } else if (r.status === 'recebido' && JSON.stringify(recA) !== JSON.stringify(JSON.parse(assinatura(r))[1])) {      // valor corrigido lá
+      r.pagamentos = [doAntigo()];
+      if (r.devidoOrigem === 'repasse' && rp && rp.valor != null) r.devido = rp.valor;
+    }
+    const vp = r.valorPrevisto != null ? r.valorPrevisto : null;
+    if (vp !== vpA && r.devidoOrigem !== 'repasse') { r.devido = vp; r.devidoOrigem = vp != null ? 'combinado' : null; }
+    // recebida lá continua recebida aqui: pela planilha, o devido é o que ela pagou; à mão, sem valor devido (como na migração)
+    if (r.status === 'recebido' && (!quitada(r) || (stA !== 'recebido' && rp && rp.origem === 'repasse'))) {
+      if (rp && rp.origem === 'repasse') {
+        if (r.devidoOrigem !== 'repasse') r.devidoAntes = { valor: r.devido != null ? r.devido : null, origem: r.devidoOrigem || null };
+        r.devido = totalRecebido(r); r.devidoOrigem = 'repasse';
+      } else { r.devido = null; r.devidoOrigem = null; }
+    }
+    if (r.origem === 'repasse' && rp && rp.repId && !r.repCriador) r.repCriador = rp.repId;
+    delete r.espelho;
+    return true;
+  }
+  /** Espelho gravado junto em toda ficha: status, recebido e valorPrevisto como a versão 1.8 entende. */
+  function compatFinanceiro(r) {
+    if (!r || !Array.isArray(r.pagamentos)) return r;
+    const s = situacao(r);
+    if (s !== 'semcobranca') r.status = s === 'recebido' ? 'recebido' : 'aberto';
+    const pg = r.pagamentos;
+    if (r.status === 'recebido' && pg.length) {
+      const ult = pg[pg.length - 1]; const rep = [...pg].reverse().find((p) => p.origem === 'repasse');
+      r.recebido = { valor: pg.some((p) => p.valor == null) ? null : totalRecebido(r), data: ult.data || null,
+        origem: rep ? 'repasse' : ult.origem || 'manual', repId: rep ? rep.repId : null, fonte: ult.fonte || null };
+    } else r.recebido = null;
+    if (r.devidoOrigem === 'combinado') r.valorPrevisto = r.devido;
+    else if (r.status !== 'recebido') r.valorPrevisto = null;
+    r.espelho = assinatura(r);
+    return r;
+  }
+  /** Um ato da planilha paga esta cirurgia. Entra o pagamento, e o valor devido passa a ser o que a planilha identificou,
+   *  somado ao que já tinha entrado (num complemento, o devido cresce junto e o saldo continua zero). O devido de antes
+   *  fica guardado para desfazer a planilha. */
+  function pagarPeloRepasse(r, a, linhas, pag, o) {
+    if (!Array.isArray(r.pagamentos)) migrarFinanceiro(r);
+    // o.substituir: a linha é o mesmo pagamento que ela já tinha registrado. O dela sai da lista (fica guardado para
+    // desfazer a planilha) e o da planilha entra no lugar, sem somar.
+    if (o && o.substituir) {
+      const dela = r.pagamentos.filter((p) => p.origem !== 'repasse');
+      r.substituidos = [...(r.substituidos || []), ...dela.map((p) => ({ ...p, por: pag.repId }))];
+      r.pagamentos = r.pagamentos.filter((p) => p.origem === 'repasse');
+    }
+    const base = r.devidoOrigem === 'repasse' && r.devido != null ? r.devido : totalRecebido(r);
+    if (r.devidoOrigem !== 'repasse' && !r.devidoAntes) r.devidoAntes = { valor: r.devido != null ? r.devido : null, origem: r.devidoOrigem || null };
+    r.devido = round2(base + a.valor); r.devidoOrigem = 'repasse';
+    r.pagamentos.push(pag); r.rep = [...(r.rep || []), ...linhas];
+    if (r.status === 'semcobranca') r.status = 'aberto';
+    return r;
+  }
+  /** Tira desta cirurgia o que a planilha repId pôs: pagamentos, linhas e, quando não sobra pagamento de planilha, a data,
+   *  a hora e o valor devido de antes. Devolve 'apagar' (criada por ela e sem outro pagamento), 'mudou' ou null. */
+  function desfazerRepasseNaFicha(r, repId) {
+    if (!Array.isArray(r.pagamentos)) migrarFinanceiro(r);
+    const saem = r.pagamentos.filter((p) => p.origem === 'repasse' && p.repId === repId);
+    if (!saem.length) return null;
+    r.pagamentos = r.pagamentos.filter((p) => !saem.includes(p));
+    const voltam = (r.substituidos || []).filter((p) => p.por === repId);
+    if (voltam.length) {
+      r.pagamentos.push(...voltam.map(({ por, ...p }) => p));
+      r.substituidos = r.substituidos.filter((p) => p.por !== repId); if (!r.substituidos.length) delete r.substituidos;
+    }
+    r.rep = (r.rep || []).filter((l) => l.repId !== repId);
+    const outroRep = r.pagamentos.find((p) => p.origem === 'repasse');
+    if (r.origem === 'repasse' && r.repCriador === repId) {
+      if (!r.pagamentos.length) return 'apagar';
+      r.repCriador = outroRep ? outroRep.repId : null;
+    }
+    if (r.devidoOrigem === 'repasse') {
+      if (outroRep) r.devido = round2(r.devido - saem.reduce((s, p) => s + (p.valor || 0), 0));
+      else { const ant = r.devidoAntes || { valor: null, origem: null }; r.devido = ant.valor; r.devidoOrigem = ant.origem; delete r.devidoAntes; }
+    }
+    if (!outroRep && r.antesDaPlanilha) {
+      const ap = r.antesDaPlanilha; r.date = ap.date; r.time = ap.time;
+      r.revisar = [...new Set([...(r.revisar || []), ...(ap.avisos || [])])];
+      delete r.antesDaPlanilha; delete r.horaDaPlanilha;
+    }
+    return 'mudou';
+  }
+
   // ---------- estimativas ----------
+  // Linhas da mesma cirurgia vindas de planilhas diferentes (complemento, recurso de glosa): somam na linha do mesmo dia,
+  // colega e procedimento, para a referência ser o valor que a cirurgia rendeu, e não duas linhas soltas.
+  function juntarComplementos(linhas) {
+    const out = [], onde = new Map();
+    for (const l of linhas) {
+      const k = `${l.date}|${norm(l.exec || '')}|${l.procName || ''}`;
+      const i = onde.get(k);
+      if (i != null && l.repId && out[i].repId && out[i].repId !== l.repId) out[i] = { ...out[i], valor: round2(out[i].valor + l.valor) };
+      else { if (i == null) onde.set(k, out.length); out.push({ ...l }); }
+    }
+    return out;
+  }
   function buildRefs(records, extraHol) {
     const byProc = new Map(), byFam = new Map(), byProcConv = new Map();
     const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
     for (const r of records) {
       if (!r.rep || !r.rep.length) continue;
-      const acts = groupActs(r.rep);
+      const acts = groupActs(juntarComplementos(r.rep));
       for (const a of acts) {
         if (a.lines.length !== 1) continue; // atos com vários procedimentos têm redução; ficam fora da referência
         const l = a.lines[0]; if (!l.procName || !(l.valor > 0)) continue;
@@ -780,6 +995,8 @@
     parseCaption, parseChat, describeKey, keySlot, findEdited, groupMessages, collectUnknown, avisosDoEnvio, recordFromEntry,
     zipOpen, zipEntryBlob, zipEntryChecked, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
+    totalRecebido, quitada, situacao, emAberto, migrarFinanceiro, compatFinanceiro, reconciliarFinanceiro, pagarPeloRepasse, desfazerRepasseNaFicha,
+    juntarComplementos,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

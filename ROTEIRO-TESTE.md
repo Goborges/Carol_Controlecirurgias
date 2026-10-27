@@ -1,6 +1,6 @@
 # Roteiro de teste no iPhone
 
-Use depois de cada lote publicado no GitHub. Leva uns 20 minutos e nunca mexe nos dados da Carol: tudo acontece no **modo de teste**, um banco separado, com dados inventados.
+Use depois de cada lote publicado no GitHub. Leva uns 25 minutos e nunca mexe nos dados da Carol: tudo acontece no **modo de teste**, um banco separado, com dados inventados.
 
 Endereço do app: `goborges.github.io/Carol_Controlecirurgias`
 
@@ -45,59 +45,71 @@ Depois, em **Cirurgias**, abra a de **4 de setembro** (Apendicectomia videolapar
 
 Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Escolha a data em que o dinheiro caiu.
 
-Em **Confirme os nomes**, o app pergunta se Bruno Teixeira Lima, Lia Monteiro Alves e Otavio Prado Reis são a mesma pessoa que Bruno, Lia e Otávio. Deixe **Sim**. Bruno Carvalho Dias aparece como colega novo, porque já há outro Bruno na planilha. Toque em **Confirmar**.
+Em **Confirme os nomes**, o app pergunta se Bruno Teixeira Lima, Lia Monteiro Alves e Otavio Prado Reis são a mesma pessoa que Bruno, Lia e Otávio. Deixe **Sim**. Bruno Carvalho Dias aparece como colega novo, porque já há outro Bruno na planilha.
 
-**Deve aparecer:** "Pronto!", com 5 cirurgias do WhatsApp pagas e 2 cirurgias novas, que não estavam na conversa, e de novo o convite de backup.
+Mais abaixo, **deve aparecer** a parte **Confira**, com as duas cirurgias de 17 de setembro. A planilha não tem a hora delas, e o app separou uma cirurgia para cada linha. Não precisa mexer.
+
+Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve aparecer** "R$ 19,73 a menos que o liberado: retenções e taxas". Toque em **Confirmar**.
+
+**Deve aparecer:** "Pronto!", com 6 cirurgias do WhatsApp pagas e 2 cirurgias novas, que não estavam na conversa, a frase "Caíram R$ 2.800,00 na conta, R$ 19,73 a menos que o liberado" e de novo o convite de backup.
 
 ## 5. Conferir as telas
 
-- **Início:** o cartão "Para receber" com valor e, em "Para completar", cirurgias e fotos sem legenda.
+- **Início:** o cartão "Para receber" com valor; embaixo dele, "Recebido em" este mês com R$ 2.800, o que caiu na conta. Em "Para completar", cirurgias e fotos sem legenda.
 - **Cirurgias:** 14 cirurgias.
 - **Relatórios → Tabela:** 14 linhas, da mais nova para a mais antiga.
 
-## 6. Lixeira e Desfazer
+## 6. Pagamento em parte
+
+1. Em **Cirurgias**, abra a de **5 de setembro** (Laparotomia exploradora + Drenagem de abscesso) e toque em **Já recebi**. Escreva `100`, toque em **Não, só uma parte** e, em "Quanto ainda falta", escreva `250`. Toque em **Confirmar**.
+2. **Deve aparecer:** "Falta receber R$ 250,00". Embaixo, o valor devido de R$ 350,00, o pagamento de R$ 100,00 e "Falta receber R$ 250,00".
+3. Toque em **Registrar pagamento**. O valor já vem com 250,00. Toque em **Confirmar**. **Deve aparecer** "Recebida", com os dois pagamentos.
+4. Toque em **Desfazer**. **Deve aparecer** de novo "Falta receber R$ 250,00". Feche a cirurgia.
+5. No **Início**, o cartão "Para receber" **deve mostrar** "R$ 250 confirmados + ≈ R$ … estimados".
+
+## 7. Lixeira e Desfazer
 
 1. Em **Cirurgias**, abra uma cirurgia e toque em **Excluir cirurgia**. Confirme. **Deve aparecer** o aviso "Cirurgia excluída" com **Desfazer**. Toque em **Desfazer**: ela volta.
 2. Exclua a mesma cirurgia de novo, sem desfazer. Em **Ajustes**, a linha **Lixeira** mostra "1 item". Abra e toque em **Recuperar**: ela volta para a lista.
 3. Em **Ajustes → Conversas do WhatsApp**, **deve aparecer** a conversa trazida, com o botão **Desfazer**. Não toque nele agora.
 
-## 7. Legenda editada e feriados
+## 8. Legenda editada e feriados
 
 1. Toque em **+ → Conversa do WhatsApp** e escolha `conversa-iphone-editada.txt`. **Deve aparecer** "1 legenda editada", com "Antes: CVL UMC Bruno". Toque em **Trazer para o app**. No "Pronto!", **deve aparecer** "1 legenda editada atualizada".
 2. Em **Cirurgias** continuam 14. A de **20 de setembro** mostra a legenda nova, "CVL UMC Bruno 21h", e embaixo "Editada no WhatsApp. Antes era…".
 3. Em **Ajustes → Feriados da cidade**, **deve aparecer** Carnaval e Corpus Christi, com "Conta" e "Não conta", e o campo com 31/08. Volte sem salvar.
 
-## 8. Fechar e abrir de novo
+## 9. Fechar e abrir de novo
 
 Feche a aba do Safari e abra outra vez o endereço com `?teste`.
 
 **Deve aparecer:** as mesmas 14 cirurgias.
 
-## 9. Fazer backup
+## 10. Fazer backup
 
 Em **Ajustes → Fazer backup**, toque em **Salvar em Arquivos** e salve no iCloud Drive.
 
 **Deve aparecer:** "Backup salvo". Com poucas fotos sai um arquivo só. Com muitas, o app pede para salvar parte por parte, e todas as partes ficam na mesma pasta.
 
-## 10. Apagar e restaurar
+## 11. Apagar e restaurar
 
 1. Em **Ajustes → Apagar os dados de teste**, confirme duas vezes. **Deve aparecer** a tela de boas-vindas, vazia.
 2. Em **Ajustes → Restaurar um backup**, escolha o arquivo do backup (todas as partes juntas, se houver). **Deve aparecer** "Restaurar o backup?" com 14 cirurgias.
 3. Toque em **Restaurar**. **Deve aparecer** "Backup restaurado." e as 14 cirurgias de volta, com as fotos.
 
-## 11. Diagnóstico
+## 12. Diagnóstico
 
 Em **Ajustes → Copiar diagnóstico**, toque em **Copiar** e cole numa conversa.
 
 **Deve aparecer:** a versão do app, "modo de teste" e contagens, sem nenhum nome, procedimento ou valor.
 
-## 12. Sair do modo de teste
+## 13. Sair do modo de teste
 
 Toque em **Sair do modo de teste**, na faixa amarela.
 
 **Deve aparecer:** o app de verdade, sem nenhuma das 14 cirurgias de teste.
 
-## 13. O app instalado
+## 14. O app instalado
 
 1. Abra pelo ícone. Em Ajustes, no fim, aparece a versão nova. Na primeira abertura depois de uma versão que mexe no banco, o app pode mostrar "Atualizando o app" por alguns segundos.
 2. Ligue o modo avião e abra pelo ícone. O app abre normalmente. Depois desligue o modo avião.
