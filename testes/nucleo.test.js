@@ -442,6 +442,46 @@
       r = nova(); igual(C.reconciliarFinanceiro(r), false, 'sem mudança');
     });
 
+    // ---------- prazo de pagamento e previsão ----------
+    const paga = (id, date, data, extra) => ({ id, date, hosp: 'UMC', conv: 'Plano Exemplo Saúde', cols: ['Bruno'], devido: 100, devidoOrigem: 'repasse',
+      pagamentos: [{ id: 'p' + id, valor: 100, data, origem: 'repasse', repId: 'A' }], ...(extra || {}) });
+    const historico = () => [paga('a', '2026-01-10', '2026-02-09'), paga('b', '2026-02-10', '2026-03-22'), paga('c', '2026-03-10', '2026-04-29'), paga('d', '2026-04-10', '2026-06-09')];
+    teste('Prazo e previsão', 'prazo de costume do hospital: a mediana para a previsão e o prazo de 9 em cada 10 para "atrasada"', () => {
+      const pz = C.prazosDePagamento(historico());
+      igual([pz.get('hosp:umc').tipico, pz.get('hosp:umc').limite, pz.get('hosp:umc').n, pz.get('hosp:umc').nome], [45, 60, 4, 'UMC'], 'UMC');
+      igual(C.prazoDe({ hosp: 'UMC', cols: [] }, pz).tipico, 45, 'cirurgia do UMC');
+      igual(C.prazoDe({ hosp: 'Outro', conv: 'Plano Exemplo Saúde', cols: [] }, pz).nome, 'Plano Exemplo Saúde', 'sem histórico do hospital, vale o do convênio');
+      igual(C.prazoDe({ hosp: 'Outro', cols: ['Lia'] }, pz), null, 'sem histórico');
+    });
+    teste('Prazo e previsão', 'sem 3 cirurgias pagas, ou com "Já recebi" sem valor, o pagador não tem prazo', () => {
+      const semValor = historico().map((r) => ({ ...r, pagamentos: [{ ...r.pagamentos[0], valor: null }] }));
+      igual([C.prazosDePagamento(historico().slice(0, 2)).size, C.prazosDePagamento(semValor).size], [0, 0], 'sem prazo');
+    });
+    teste('Prazo e previsão', 'atrasada pelo prazo do pagador; sem histórico, pelo padrão de Ajustes', () => {
+      const pz = C.prazosDePagamento(historico());
+      igual([C.limiteAtraso({ hosp: 'UMC', cols: [] }, pz, 90), C.limiteAtraso({ hosp: 'Outro', cols: [] }, pz, 90)], [60, 90], 'limites');
+      const rapido = C.prazosDePagamento(['a', 'b', 'c'].map((id) => paga(id, '2026-01-10', '2026-01-15')));
+      igual(C.limiteAtraso({ hosp: 'UMC', cols: [] }, rapido, 90), 30, 'pelo menos 30 dias');
+    });
+    teste('Prazo e previsão', 'previsão de 30, 60 e 90 dias, atrasadas e sem previsão', () => {
+      const pz = C.prazosDePagamento(historico());
+      const item = (date, hosp, valor, aprox) => ({ r: { date, hosp, cols: [] }, valor, aprox: !!aprox });
+      const p = C.previsaoRecebimento([item('2026-10-20', 'UMC', 100), item('2026-09-20', 'UMC', 200, true), item('2026-10-25', 'UMC', 50), item('2026-08-01', 'UMC', 300), item('2026-10-01', 'Outro', 70)], pz, '2026-10-27', 90);
+      igual(p.faixas.map((f) => [f.ate, f.valor, f.n, f.aprox]), [[30, 200, 1, true], [60, 150, 2, false], [90, 0, 0, false]], 'faixas');
+      igual([p.atrasadas.valor, p.semPrazo.valor, p.depois.n], [300, 70, 0], 'atrasadas e sem previsão');
+    });
+
+    // ---------- lembrete mensal ----------
+    teste('Lembrete', 'evento todo mês no dia escolhido, começando no próximo, com o ritual', () => {
+      const ics = C.lembreteIcs({ dia: 5, hora: '19:00', hoje: '2026-12-27', agora: new Date(Date.UTC(2026, 11, 27, 15, 0, 0)) });
+      const linhas = ics.split('\r\n');
+      verdade(linhas.includes('DTSTART:20270105T190000') && linhas.includes('RRULE:FREQ=MONTHLY;BYMONTHDAY=5') && linhas.includes('DTSTAMP:20261227T150000Z'), 'começa em 05/01/2027, às 19h, e repete todo dia 5');
+      verdade(linhas.every((l) => new TextEncoder().encode(l).length <= 75), 'linhas de até 75 bytes');
+      const texto = ics.replace(/\r\n /g, '');
+      verdade(texto.includes('SUMMARY:Controle de Cirurgias: conversa\\, planilha e backup') && texto.includes('3. Faça um backup.'), 'título e passos');
+      igual(C.lembreteIcs({ dia: 30, hora: '7:5', hoje: '2026-10-03' }).match(/DTSTART:(\S+)/)[1], '20261028T070500', 'dia até 28, hora completada');
+    });
+
     // ---------- estimativa ----------
     const idxE = indice();
     const linha = (date, time, procName, valor, extra) => ({ date, time, valor, conv: 'Plano Exemplo Saúde', cod: '', proc: procName.toUpperCase(), procName, fam: C.famOf(idxE, procName), funcao: 'Primeiro Auxiliar', exec: 'Bruno Teixeira Lima', ...(extra || {}) });

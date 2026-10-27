@@ -933,6 +933,86 @@
     return 'mudou';
   }
 
+  // ---------- prazo de pagamento e previsão ----------
+  // Prazo de cada pagador (hospital, convênio, colega), pelo histórico: dias entre a cirurgia e o primeiro pagamento com
+  // valor. "Já recebi" sem valor (marcadas como recebidas de uma vez, antes de usar o app) não conta: a data não é a do
+  // dinheiro. Um pagador precisa de pelo menos 3 cirurgias pagas. tipico = mediana (para a previsão); limite = o prazo em
+  // que 9 de cada 10 pagamentos chegaram (para "atrasada").
+  function prazosDePagamento(records) {
+    const grupos = new Map();
+    const add = (k, nome, d) => { if (!grupos.has(k)) grupos.set(k, { nome, dias: [] }); grupos.get(k).dias.push(d); };
+    for (const r of records) {
+      if (!r.date || situacao(r) === 'semcobranca') continue;
+      const datas = (r.pagamentos || []).filter((p) => p.valor != null && p.data).map((p) => p.data).sort();
+      if (!datas.length) continue;
+      const d = dayNum(datas[0]) - dayNum(r.date);
+      if (d < 0 || d > 730) continue;      // data estranha: pagamento antes da cirurgia ou depois de 2 anos
+      if (r.hosp) add('hosp:' + norm(r.hosp), r.hosp, d);
+      if (r.conv) add('conv:' + norm(r.conv), r.conv, d);
+      for (const c of r.cols || []) if (c) add('col:' + norm(c), c, d);
+    }
+    const out = new Map();
+    for (const [k, g] of grupos) {
+      if (g.dias.length < 3) continue;
+      const ds = g.dias.slice().sort((x, y) => x - y);
+      out.set(k, { nome: g.nome, n: ds.length, tipico: Math.round(median(ds)), limite: ds[Math.ceil(ds.length * 0.9) - 1] });
+    }
+    return out;
+  }
+  /** O prazo que vale para uma cirurgia: o do hospital; sem histórico dele, o do convênio; depois, o do colega. */
+  function prazoDe(r, prazos) {
+    const chaves = [r.hosp && 'hosp:' + norm(r.hosp), r.conv && 'conv:' + norm(r.conv), ...(r.cols || []).map((c) => c && 'col:' + norm(c))];
+    for (const k of chaves) if (k && prazos.has(k)) return prazos.get(k);
+    return null;
+  }
+  /** Depois de quantos dias sem pagamento a cirurgia fica atrasada: o limite do pagador (pelo menos 30 dias) ou, sem
+   *  histórico, o padrão de Ajustes. */
+  const limiteAtraso = (r, prazos, padrao) => { const p = prazoDe(r, prazos); return p ? Math.max(p.limite, 30) : padrao; };
+  /** Quanto deve cair nos próximos 30, 60 e 90 dias, pelo prazo típico de cada pagador. itens: [{ r, valor, aprox }] das
+   *  cirurgias a receber. A que já passou do prazo típico, sem estar atrasada, entra nos próximos 30 dias. */
+  function previsaoRecebimento(itens, prazos, hoje, padrao) {
+    const novo = () => ({ valor: 0, n: 0, aprox: false });
+    const faixas = [30, 60, 90].map((ate) => ({ ate, ...novo() }));
+    const out = { faixas, depois: novo(), atrasadas: novo(), semPrazo: novo() };
+    const h = dayNum(hoje);
+    for (const it of itens) {
+      const r = it.r; const p = prazoDe(r, prazos); const idade = h - dayNum(r.date);
+      let alvo;
+      if (idade > limiteAtraso(r, prazos, padrao)) alvo = out.atrasadas;
+      else if (!p) alvo = out.semPrazo;
+      else { const falta = Math.max(0, p.tipico - idade); alvo = faixas.find((f) => falta <= f.ate) || out.depois; }
+      alvo.valor = round2(alvo.valor + (it.valor || 0)); alvo.n++; if (it.aprox) alvo.aprox = true;
+    }
+    return out;
+  }
+
+  // ---------- lembrete mensal (arquivo de calendário) ----------
+  /** Evento que se repete todo mês no dia escolhido, com o ritual do app. Hora local (o Calendário usa o fuso do iPhone).
+   *  o: { dia: 1..28, hora: 'HH:MM', hoje: 'AAAA-MM-DD', agora: Date } */
+  function lembreteIcs(o) {
+    const dia = Math.min(28, Math.max(1, Math.round(+o.dia || 5)));
+    const [hh, mm] = String(o.hora || '19:00').split(':').map((x) => pad2(+x || 0));
+    let [y, m] = o.hoje.split('-').map(Number);
+    if (+o.hoje.slice(8, 10) > dia) { m++; if (m > 12) { m = 1; y++; } }
+    const inicio = `${y}${pad2(m)}${pad2(dia)}T${hh}${mm}00`;
+    const a = o.agora || new Date();
+    const carimbo = `${a.getUTCFullYear()}${pad2(a.getUTCMonth() + 1)}${pad2(a.getUTCDate())}T${pad2(a.getUTCHours())}${pad2(a.getUTCMinutes())}${pad2(a.getUTCSeconds())}Z`;
+    const txt = (t) => t.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+    // linhas de no máximo 75 bytes; a continuação começa com um espaço (sem partir uma letra acentuada no meio)
+    const dobrar = (linha) => {
+      const enc = new TextEncoder(); const partes = []; let atual = '', bytes = 0;
+      for (const ch of linha) { const b = enc.encode(ch).length; if (bytes + b > (partes.length ? 74 : 75)) { partes.push(atual); atual = ''; bytes = 0; } atual += ch; bytes += b; }
+      partes.push(atual); return partes.join('\r\n ');
+    };
+    const titulo = 'Controle de Cirurgias: conversa, planilha e backup';
+    const passos = '1. Exporte a conversa do grupo do WhatsApp, com as fotos, e traga para o app.\n2. Traga a planilha de repasse do mês.\n3. Faça um backup.';
+    return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Controle de Cirurgias//PT-BR', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+      'BEGIN:VEVENT', 'UID:lembrete-mensal@controle-de-cirurgias', 'DTSTAMP:' + carimbo, 'DTSTART:' + inicio, 'DURATION:PT20M',
+      'RRULE:FREQ=MONTHLY;BYMONTHDAY=' + dia, 'SUMMARY:' + txt(titulo), 'DESCRIPTION:' + txt(passos),
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', 'DESCRIPTION:' + txt(titulo), 'END:VALARM',
+      'END:VEVENT', 'END:VCALENDAR'].map(dobrar).join('\r\n') + '\r\n';
+  }
+
   // ---------- estimativas ----------
   // Linhas da mesma cirurgia vindas de planilhas diferentes (complemento, recurso de glosa): somam na linha do mesmo dia,
   // colega e procedimento, para a referência ser o valor que a cirurgia rendeu, e não duas linhas soltas.
@@ -996,7 +1076,7 @@
     zipOpen, zipEntryBlob, zipEntryChecked, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
     totalRecebido, quitada, situacao, emAberto, migrarFinanceiro, compatFinanceiro, reconciliarFinanceiro, pagarPeloRepasse, desfazerRepasseNaFicha,
-    juntarComplementos,
+    juntarComplementos, prazosDePagamento, prazoDe, limiteAtraso, previsaoRecebimento, lembreteIcs,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
