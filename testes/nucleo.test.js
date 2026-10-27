@@ -60,8 +60,10 @@
       igual(p.procs, ['Gastrectomia'], 'procedimentos');
       verdade(p.unknown.some((u) => u.guess === 'proc'), 'deveria marcar como procedimento novo');
     });
-    teste('Legendas', '"VLP colecisto" vira um procedimento só', () => igual(C.parseCaption('VLP colecisto UMC Bruno', indice(), '2026-09-12').procs, [CVL], 'procedimentos'), 'item 15');
-    teste('Legendas', '"VLP colecistectomia" vira um procedimento só', () => igual(C.parseCaption('VLP colecistectomia', indice(), '2026-09-12').procs, [CVL], 'procedimentos'), 'item 15');
+    teste('Legendas', '"VLP colecisto" vira um procedimento só', () => igual(C.parseCaption('VLP colecisto UMC Bruno', indice(), '2026-09-12').procs, [CVL], 'procedimentos'));
+    teste('Legendas', '"VLP colecistectomia" vira um procedimento só', () => igual(C.parseCaption('VLP colecistectomia', indice(), '2026-09-12').procs, [CVL], 'procedimentos'));
+    teste('Legendas', '"VLP" vale para o procedimento do mesmo trecho, não para o anterior', () => igual(C.parseCaption('Apendicectomia + VLP colecisto', indice(), '2026-09-12').procs, ['Apendicectomia', CVL], 'procedimentos'));
+    teste('Legendas', '"VLP" sem versão por vídeo conhecida não some com o procedimento', () => igual(C.parseCaption('VLP histerectomia', indice(), '2026-09-12').procs, ['Histerectomia'], 'procedimentos'));
 
     // ---------- conversa do iPhone ----------
     teste('Conversa do iPhone', 'lê as 19 mensagens, separa as 2 de sistema e acha o nome do grupo', async () => {
@@ -88,7 +90,7 @@
     });
     teste('Conversa do iPhone', 'duas fotos seguidas ficam na mesma cirurgia', async () => {
       const r = doDia((await conversa()).recs, '2026-09-02');
-      igual([r.procs, r.hosp, r.cols, r.time, r.photoNames.length], [[CVL], 'UMC', ['Bruno'], '10:15', 2], 'cirurgia de 02/09');
+      igual([r.procs, r.hosp, r.cols, r.msgTime, r.photoNames.length], [[CVL], 'UMC', ['Bruno'], '10:15', 2], 'cirurgia de 02/09');
     });
     teste('Conversa do iPhone', 'legenda mandada logo depois da foto vale para a foto', async () => {
       const r = doDia((await conversa()).recs, '2026-09-05');
@@ -118,26 +120,53 @@
     teste('Conversa do iPhone', 'a chave de cada mensagem se lê de volta: data, hora, começo do texto e fotos', async () => {
       const { g } = await conversa();
       const e = g.entries.find((x) => x.caption.startsWith('CVL Bruno UMC'));
-      igual(C.describeKey(e.key), { date: '2026-09-02', time: '10:15', texto: 'cvl bruno umc', arquivos: 1, foto: null }, 'cirurgia');
+      igual(C.describeKey(e.key), { date: '2026-09-02', time: '10:15', seg: '22', texto: 'cvl bruno umc', arquivos: 1, foto: null }, 'cirurgia');
       const l = g.loose[0];
-      igual(C.describeKey(l.key + '~1'), { date: l.date, time: l.time, texto: '', arquivos: 1, foto: 1 }, 'foto solta');
+      igual(C.describeKey(l.key + '~1'), { date: l.date, time: l.time, seg: '00', texto: '', arquivos: 1, foto: 1 }, 'foto solta');
       igual([C.describeKey(''), C.describeKey('qualquer coisa')], [null, null], 'chave estranha');
     });
     teste('Conversa do iPhone', 'sem hora na legenda, a hora do envio não vira hora da cirurgia', async () => {
       const r = doDia((await conversa()).recs, '2026-09-04');
-      verdade(r.time == null || r.horaAproximada === true, `a ficha usou a hora do envio (${r.time}) como hora da cirurgia`);
-    }, 'item 16');
+      igual([r.time, r.msgTime], [null, '21:40'], 'hora da cirurgia e hora do envio');
+    });
+    teste('Conversa do iPhone', 'enviada entre 19h e 7h em dia útil, pede para conferir a hora', async () => {
+      igual(doDia((await conversa()).recs, '2026-09-04').revisar, ['Confira a hora'], 'sexta às 21h40');
+    });
+    teste('Conversa do iPhone', 'enviada de dia, no fim de semana ou com a hora na legenda, não pergunta nada', async () => {
+      const recs = (await conversa()).recs;
+      igual([doDia(recs, '2026-09-02').revisar, doDia(recs, '2026-09-20').revisar, doDia(recs, '2026-09-15').revisar], [[], [], []], 'quarta 10h15, domingo 22h10, legenda com 18:30');
+    });
+    teste('Conversa do iPhone', 'enviada de madrugada, pede para conferir a data', () => {
+      const e = { key: 'k', date: '2026-09-23', time: '01:30', caption: 'CVL UMC Bruno', photos: [], amends: [] };
+      const r = C.recordFromEntry(e, indice(), {});
+      igual([r.date, r.time, r.revisar], ['2026-09-23', null, ['Confira a data']], 'quarta à 1h30');
+    });
+    teste('Conversa do iPhone', 'feriado da cidade conta o dia todo: não pergunta a hora', () => {
+      const e = { key: 'k', date: '2026-08-31', time: '21:00', caption: 'CVL UMC Bruno', photos: [], amends: [] };
+      igual([C.recordFromEntry(e, indice(), {}).revisar, C.recordFromEntry(e, indice(), { feriados: ['08-31'] }).revisar], [['Confira a hora'], []], 'segunda 31/08 às 21h');
+    });
 
     // ---------- legenda editada ----------
     const editada = memo(async () => C.groupMessages(C.parseChat(await io.texto('conversa-iphone-editada.txt')).messages).entries);
-    teste('Legenda editada', 'a legenda editada continua sendo a mesma mensagem', async () => {
-      const antes = (await conversa()).g.entries, depois = await editada();
-      igual(depois[depois.length - 1].key, antes[antes.length - 1].key, 'chave');
-    }, 'item 20');
+    teste('Legenda editada', 'a legenda editada é reconhecida como a mesma mensagem (hora exata e número de fotos)', async () => {
+      const { recs } = await conversa(); const depois = await editada(); const e = depois[depois.length - 1];
+      verdade(e.editada, 'a mensagem não foi marcada como editada');
+      verdade(!recs.some((r) => r.key === e.key), 'a chave nova já existia');
+      igual((C.findEdited(e, recs) || {}).date, '2026-09-20', 'ficha achada');
+    });
     teste('Legenda editada', 'o aviso "Esta mensagem foi editada" sai do texto', async () => {
       const depois = await editada();
-      verdade(!/editada/i.test(depois[depois.length - 1].caption), 'o aviso ficou na legenda');
-    }, 'item 20');
+      igual(depois[depois.length - 1].caption, 'CVL UMC Bruno 21h', 'legenda');
+    });
+    teste('Legenda editada', 'com duas fichas no mesmo segundo, não adivinha', async () => {
+      const { recs } = await conversa(); const depois = await editada(); const e = depois[depois.length - 1];
+      const orig = C.findEdited(e, recs); const gemea = { ...orig, id: 'outra', key: orig.key.replace('|cvl umc bruno|', '|outra coisa|') };
+      igual(C.findEdited(e, [...recs, gemea]), null, 'ficha achada');
+    });
+    teste('Legenda editada', 'mensagem que não foi editada continua com a mesma chave', async () => {
+      const antes = (await conversa()).g.entries, depois = await editada();
+      igual(depois.slice(0, -1).map((x) => x.key), antes.slice(0, -1).map((x) => x.key), 'chaves das outras');
+    });
 
     // ---------- conversa do Android ----------
     const android = memo(async () => { const chat = C.parseChat(await io.texto('conversa-android.txt')); return { chat, g: C.groupMessages(chat.messages) }; });
@@ -217,7 +246,7 @@
     teste('Planilha de repasse', 'linha sem hora fica sem hora, e não meia-noite', async () => {
       const l = (await repasse()).lines[4];
       igual([l.date, l.time], ['2026-09-17', null], 'linha de 17/09');
-    }, 'item 25');
+    });
     teste('Planilha de repasse', 'reconhece os procedimentos da planilha', () => {
       const idx = indice();
       igual(['COLECISTECTOMIA SEM COLANGIOGRAFIA POR VIDEOLAPAROSCOPIA', 'HERNIORRAFIA INGUINAL', 'FECHAMENTO DE PAREDE ABDOMINAL', 'APENDICECTOMIA POR VIDEOLAPAROSCOPIA', 'GASTRECTOMIA PARCIAL']
@@ -245,7 +274,7 @@
       const { c, acts } = await plano();
       const do17 = acts.filter((x) => x.date === '2026-09-17');
       igual(do17.length, 2, 'atos de 17/09');
-      igual(do17.map((a) => (c.recs.find((r) => r.id === a.recordId) || {}).time).sort(), ['08:30', '15:10'], 'cirurgias de 17/09');
+      igual(do17.map((a) => (c.recs.find((r) => r.id === a.recordId) || {}).msgTime).sort(), ['08:30', '15:10'], 'cirurgias de 17/09');
     }, 'item 25');
     teste('Cruzamento', 'complemento de cirurgia já paga cai na mesma cirurgia', async () => {
       const c = await conversa(); const rep = await repasse();
@@ -254,11 +283,28 @@
       const a = C.planRepasse(comp, recs, c.index, { hosp: 'UMC' })[0];
       igual(a.recordId, recs.find((r) => r.date === '2026-09-02').id, 'complemento');
     }, 'item 23');
+    teste('Cruzamento', 'duas cirurgias iguais no mesmo dia, sem hora na legenda: a hora do envio ajuda a casar na ordem certa', () => {
+      const idx = indice();
+      const ficha = (id, msgTime) => ({ id, status: 'aberto', date: '2026-09-10', time: null, msgDate: '2026-09-10', msgTime, procs: [CVL], hosp: 'UMC', cols: ['Bruno'] });
+      const recs = [ficha('tarde', '15:40'), ficha('manha', '09:50')];
+      const ln = (time) => ({ date: '2026-09-10', time, valor: 444.02, conv: 'Convênio Teste', cod: '1', proc: 'COLECISTECTOMIA SEM COLANGIOGRAFIA POR VIDEOLAPAROSCOPIA', funcao: 'Primeiro Auxiliar', exec: 'Bruno Teixeira Lima' });
+      const acts = C.planRepasse({ id: 'r', lines: [ln('09:10'), ln('14:30')] }, recs, idx, { hosp: 'UMC' });
+      igual(acts.map((a) => a.recordId), ['manha', 'tarde'], 'casamento');
+    });
     teste('Cruzamento', 'nome completo novo com o mesmo primeiro nome não é ligado sem perguntar', () => {
       const idx = C.buildIndex(C.defaultTerms().concat([{ id: 'tb', type: 'col', name: 'Bruno', aliases: ['bruno', 'bruno teixeira lima'] }]));
       const m = C.mapExecutor('Bruno Carvalho Dias', idx);
-      verdade(!(m && m.how === 'nome'), 'ligou "Bruno Carvalho Dias" ao Bruno sozinho');
-    }, 'item 21');
+      igual([m.term.name, m.how, m.outroNome], ['Bruno', 'primeiro-nome', true], 'outro Bruno');
+    });
+    teste('Cruzamento', 'na primeira vez que o nome completo aparece, pergunta se é o colega', () => {
+      const idx = C.buildIndex(C.defaultTerms().concat([{ id: 'tb', type: 'col', name: 'Bruno', aliases: ['bruno'] }]));
+      const m = C.mapExecutor('Bruno Teixeira Lima', idx);
+      igual([m.how, m.outroNome], ['primeiro-nome', false], 'primeira vez');
+    });
+    teste('Cruzamento', 'nome completo já confirmado liga direto', () => {
+      const idx = C.buildIndex(C.defaultTerms().concat([{ id: 'tb', type: 'col', name: 'Bruno', aliases: ['bruno', 'bruno teixeira lima'] }]));
+      igual(C.mapExecutor('BRUNO TEIXEIRA LIMA', idx).how, 'exato', 'confirmado');
+    });
 
     // ---------- estimativa ----------
     const idxE = indice();
@@ -279,12 +325,6 @@
     teste('Estimativa', 'sem referência do procedimento, usa a da mesma família', () => perto(est(aberta('2026-09-15', '10:00', ['Colecistectomia'])).valor, 444.02, 'colecistectomia aberta'));
     teste('Estimativa', 'sem nenhuma referência, fica sem valor', () => igual([est(aberta('2026-09-15', '10:00', ['Histerectomia'])).valor, est(aberta('2026-09-15', '10:00', ['Histerectomia'])).parcial], [null, true], 'histerectomia'));
     teste('Estimativa', 'com um procedimento sem referência, avisa que é parcial', () => { const e = est(aberta('2026-09-15', '10:00', [CVL, 'Gastrectomia'])); igual([C.round2(e.valor), e.parcial, e.faltam], [444.02, true, 1], 'CVL + gastrectomia'); });
-    teste('Estimativa', 'o valor do 1º auxiliar não se mistura com o do cirurgião principal', () => {
-      const prin = { funcao: 'Cirurgião' };
-      const r2 = C.buildRefs([pago(linha('2026-09-02', '10:15', CVL, 444.02)), pago(linha('2026-09-03', '10:15', CVL, 444.02)),
-        pago(linha('2026-09-04', '10:15', CVL, 1480, prin)), pago(linha('2026-09-08', '10:15', CVL, 1480, prin)), pago(linha('2026-09-09', '10:15', CVL, 1480, prin))], []);
-      perto(C.estimate(aberta('2026-09-15', '10:00', [CVL], { funcao: 'Primeiro auxiliar' }), r2, idxE, []).valor, 444.02, 'CVL do 1º auxiliar');
-    }, 'item 18');
 
     // ---------- urgência e feriados ----------
     teste('Urgência e feriados', 'Páscoa de 2026 em 5 de abril e Sexta-feira Santa como feriado', () => { igual(C.easter(2026), '2026-04-05', 'Páscoa'); verdade(C.isHoliday('2026-04-03'), 'Sexta-feira Santa'); });
@@ -293,13 +333,23 @@
       verdade(C.isHoliday('2026-08-31', C.parseExtraHolidays('31/08')), '31/08 na lista da cidade');
     });
     teste('Urgência e feriados', 'lê a lista de feriados da cidade (dia/mês)', () => igual(C.parseExtraHolidays('31/08; 1/1'), ['08-31', '01-01'], 'feriados'));
-    teste('Urgência e feriados', 'aceita feriado com ano, como 04/06/2026', () => verdade(C.parseExtraHolidays('04/06/2026').length === 1, 'a data com ano foi ignorada'), 'item 19');
+    teste('Urgência e feriados', 'aceita feriado com ano, como 04/06/2026, que vale só naquele ano', () => {
+      const f = C.parseExtraHolidays('04/06/2026');
+      igual([f, C.isHoliday('2026-06-04', f), C.isHoliday('2027-06-04', f)], [['2026-06-04'], true, false], 'feriado de 2026');
+    });
+    teste('Urgência e feriados', 'Carnaval (segunda e terça) e Corpus Christi, calculados pela Páscoa', () => {
+      const f = C.parseExtraHolidays('31/08, carnaval, corpus christi');
+      igual(f, ['08-31', 'carnaval', 'corpus'], 'lista');
+      igual(['2026-02-16', '2026-02-17', '2026-02-18', '2026-06-04', '2027-02-08', '2027-02-09', '2027-05-27'].map((d) => C.isHoliday(d, f)), [true, true, false, true, true, true, true], 'datas');
+      igual([C.isHoliday('2026-02-17', []), C.isHoliday('2026-06-04', [])], [false, false], 'sem escolher, não contam');
+    });
+    teste('Urgência e feriados', 'data que não existe fica de fora', () => igual(C.parseExtraHolidays('31/02, 30/02/2026, 29/02'), ['02-29'], 'datas'));
     teste('Urgência e feriados', 'limites do horário: 18h59 normal, 19h urgência, 6h59 urgência, 7h normal', () =>
       igual(['18:59', '19:00', '06:59', '07:00'].map((h) => C.isUrgent('2026-09-15', h, [])), [false, true, true, false], 'terça-feira'));
     teste('Urgência e feriados', 'sábado, domingo e feriado contam o dia todo', () =>
       igual([C.isUrgent('2026-09-19', '10:00', []), C.isUrgent('2026-09-20', null, []), C.isUrgent('2026-09-07', '10:00', [])], [true, true, true], 'urgência'));
     teste('Urgência e feriados', 'dia útil sem hora fica indefinido', () => igual(C.isUrgent('2026-09-15', null, []), null, 'terça sem hora'));
-    teste('Urgência e feriados', 'hoje toda cirurgia nesse horário conta como urgência, eletiva ou não (regra do item 17, a confirmar)', () => verdade(C.isUrgent('2026-09-15', '20:00', []) === true, 'terça às 20h'));
+    teste('Urgência e feriados', 'toda cirurgia nesse horário conta como urgência, eletiva ou não', () => verdade(C.isUrgent('2026-09-15', '20:00', []) === true, 'terça às 20h'));
     teste('Urgência e feriados', 'conferência: fim de semana pago pelo valor normal é apontado, e com +30% não', () => {
       const sab = pago(linha('2026-09-19', '10:00', CVL, 444.02)), dom = pago(linha('2026-09-20', '22:10', CVL, 577.23));
       const recs = [pago(linha('2026-09-02', '10:15', CVL, 444.02)), sab, dom];

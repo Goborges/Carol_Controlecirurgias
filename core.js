@@ -59,16 +59,28 @@
     return ymd(y, month, day);
   }
   const FIXED_HOLIDAYS = ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25'];
+  /** Feriados da cidade: "31/08" vale todo ano; "04/06/2026" só naquele dia; "carnaval" (segunda e terça) e
+   *  "corpus christi" mudam de data todo ano e são calculados pela Páscoa. Devolve 'MM-DD', 'AAAA-MM-DD', 'carnaval', 'corpus'. */
   function parseExtraHolidays(txt) {
-    return String(txt || '').split(/[\s,;]+/).map((s) => {
-      const m = s.match(/^(\d{1,2})\/(\d{1,2})$/); return m ? `${pad2(m[2])}-${pad2(m[1])}` : null;
-    }).filter(Boolean);
+    const out = [];
+    for (const raw of String(txt || '').split(/[\s,;]+/)) {
+      const s = raw.trim(); if (!s) continue;
+      let m = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+      if (m) { if (validDate(2000, +m[2], +m[1])) out.push(`${pad2(m[2])}-${pad2(m[1])}`); continue; }   // 2000: aceita 29/02
+      m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);
+      if (m) { let y = +m[3]; if (y < 100) y += 2000; if (validDate(y, +m[2], +m[1])) out.push(ymd(y, +m[2], +m[1])); continue; }
+      const w = norm(s);
+      if (w === 'carnaval') out.push('carnaval'); else if (w === 'corpus') out.push('corpus');
+    }
+    return [...new Set(out)];
   }
   function isHoliday(date, extra) {
-    const md = date.slice(5);
-    if (FIXED_HOLIDAYS.includes(md) || (extra || []).includes(md)) return true;
-    const y = +date.slice(0, 4);
-    return date === fromDayNum(dayNum(easter(y)) - 2); // sexta-feira santa
+    const md = date.slice(5); extra = extra || [];
+    if (FIXED_HOLIDAYS.includes(md) || extra.includes(md) || extra.includes(date)) return true;
+    const pascoa = dayNum(easter(+date.slice(0, 4))), d = dayNum(date);
+    if (d === pascoa - 2) return true;                                                   // sexta-feira santa
+    if (extra.includes('carnaval') && (d === pascoa - 48 || d === pascoa - 47)) return true;   // segunda e terça de Carnaval
+    return extra.includes('corpus') && d === pascoa + 60;                                // Corpus Christi
   }
   /** true = horário de urgência; false = horário normal; null = sem hora e dia útil */
   function isUrgent(date, time, extra) {
@@ -212,16 +224,21 @@
       }
       const pUsed = toks.map((t, i) => used[i]);
       const procs = scan(toks, index, [T.PROC], pUsed);
+      const viraramVideo = new Set();   // procedimentos que o "VLP" solto já transformou na versão por vídeo
       for (const p of procs) {
+        if (viraramVideo.has(p)) continue;
         if (p.term.name === 'Videolaparoscopia' && (res.procs.length || procs.length > 1)) {
-          // "VLP" solto junto de outro procedimento: vira modificador
-          const base = lastProc || procs.find((q) => q !== p && q.term.name !== 'Videolaparoscopia');
+          // "VLP" solto junto de outro procedimento: vira modificador dele. Vale primeiro o procedimento do mesmo trecho
+          // ("VLP colecisto"); sem ele, o do trecho anterior ("Colecisto - VLP"). O procedimento base não entra de novo.
+          const doTrecho = procs.find((q) => q !== p && q.term.name !== 'Videolaparoscopia' && !viraramVideo.has(q));
+          const base = doTrecho || lastProc;
           if (base) {
             const variant = index.phrases.find((ph) => ph.term.type === T.PROC && ph.alias === base.alias + ' vlp');
             if (variant) {
               const i = res.procs.indexOf(base.term.name);
-              if (i >= 0) res.procs[i] = variant.term.name; else res.procs.push(variant.term.name);
+              if (i >= 0) res.procs[i] = variant.term.name; else if (!res.procs.includes(variant.term.name)) res.procs.push(variant.term.name);
               lastProc = { term: variant.term, alias: variant.alias };
+              if (doTrecho) viraramVideo.add(doTrecho);
             }
             continue;
           }
@@ -265,6 +282,8 @@
   const OMIT_RE = /(<?\s*(?:imagem ocultada|image omitted|foto ocultada|m[ií]dia oculta|media omitted|v[ií]deo omitido|video omitted|figurinha omitida|sticker omitted|documento omitido|document omitted|gif omitido|[aá]udio ocultado|audio omitted)\s*>?)/gi;
   const SYSTEM_RE = /(criptografia de ponta a ponta|end-to-end encrypted|criou (este|o) grupo|created (this )?group|adicionou|added you|saiu|left|mudou (o nome|a imagem|a descri)|changed (the|this) group|mensagem foi apagada|message was deleted|mensagem apagada|mensagens tempor[aá]rias|disappearing messages|c[oó]digo de seguran[cç]a)/i;
   const IMG_EXT = /\.(jpe?g|png|heic|webp)$/i;
+  // o WhatsApp acrescenta este aviso no fim de uma mensagem editada
+  const EDIT_RE = /\s*<\s*(?:esta mensagem foi editada|mensagem editada|this message was edited|message edited|este mensaje fue editado|mensaje editado)\s*>\s*/gi;
 
   function parseChat(text) {
     const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
@@ -288,7 +307,9 @@
       let t = msg.raw; const files = [];
       for (const re of ATT_RES) t = t.replace(re, (all, f) => { files.push(stripMarks(f).trim()); return ' '; });
       let omitted = 0; t = t.replace(OMIT_RE, () => { omitted++; return ' '; });
-      msg.text = stripMarks(t).replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+      let editada = false; t = stripMarks(t).replace(EDIT_RE, () => { editada = true; return ' '; });
+      msg.text = t.replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+      if (editada) msg.editada = true;
       msg.files = files; msg.photos = files.filter((f) => IMG_EXT.test(f)); msg.omitted = omitted;
       msg.system = msg.system || (msg.lrm && !files.length && !omitted && SYSTEM_RE.test(msg.text));
       const base = `${msg.date}T${msg.time}:${pad2(msg.sec)}|${norm(msg.text).slice(0, 48)}|${files.length + omitted}`;
@@ -304,7 +325,16 @@
   function describeKey(key) {
     const m = String(key || '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):(\d{2})\|([a-z0-9 ]*)\|(\d+)#(\d+)(?:~(\d+))?$/);
     if (!m) return null;
-    return { date: m[1], time: m[2], texto: m[4], arquivos: +m[5], foto: m[7] != null ? +m[7] : null };
+    return { date: m[1], time: m[2], seg: m[3], texto: m[4], arquivos: +m[5], foto: m[7] != null ? +m[7] : null };
+  }
+  /** O "lugar" de uma mensagem na conversa: data, hora com segundos e quantos arquivos. Não muda quando a legenda é editada. */
+  function keySlot(key) { const d = describeKey(key); return d && d.foto == null ? `${d.date}T${d.time}:${d.seg}|${d.arquivos}` : null; }
+  /** Legenda editada: o texto mudou, então a chave mudou. Acha a ficha da mesma mensagem pelo lugar dela na conversa
+   *  (hora exata e número de arquivos). Só devolve quando há uma única ficha nesse lugar. */
+  function findEdited(entry, records) {
+    const s = keySlot(entry.key); if (!s) return null;
+    const c = records.filter((r) => r.key && r.key !== entry.key && [r.key, ...(r.chavesAntigas || [])].some((k) => keySlot(k) === s));
+    return c.length === 1 ? c[0] : null;
   }
 
   /** Agrupa mensagens em cirurgias (legenda + fotos) e fotos sem legenda. */
@@ -318,7 +348,7 @@
       const media = hasMedia(m); const txt = m.text;
       if (!media && !txt) continue;
       if (media && txt) {
-        const ent = { key: m.key, date: m.date, time: m.time, sec: m.sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m) };
+        const ent = { key: m.key, date: m.date, time: m.time, sec: m.sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m), editada: !!m.editada };
         const recent = pending.filter((p) => tmin(m) - tmin(p) <= 5);
         pending = pending.filter((p) => !recent.includes(p)); flush();
         for (const p of recent) { ent.photos.push(...p.photos); ent.omitted += p.omitted; }
@@ -334,12 +364,12 @@
       // só texto
       if (AMEND_RE.test(txt) && last && last.date === m.date && tmin(m) - last.t <= 6 * 60) { last.amends.push({ key: m.key, text: txt }); continue; }
       if (pending.length && tmin(m) - tmin(pending[pending.length - 1]) <= 15) {
-        const ent = { key: m.key, date: pending[0].date, time: pending[0].time, sec: pending[0].sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m) };
+        const ent = { key: m.key, date: pending[0].date, time: pending[0].time, sec: pending[0].sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m), editada: !!m.editada };
         for (const p of pending) { ent.photos.push(...p.photos); ent.omitted += p.omitted; }
         pending = []; entries.push(ent); last = ent; continue;
       }
       flush();
-      const ent = { key: m.key, date: m.date, time: m.time, sec: m.sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m), textOnly: true };
+      const ent = { key: m.key, date: m.date, time: m.time, sec: m.sec, caption: txt, photos: [], omitted: 0, amends: [], t: tmin(m), textOnly: true, editada: !!m.editada };
       entries.push(ent); last = ent;
     }
     flush();
@@ -365,12 +395,22 @@
     return out.sort((a, b) => b.count - a.count);
   }
 
+  /** Sem hora (nem dia) na legenda, a hora do envio não vira hora da cirurgia. Só vale perguntar quando ela muda o valor:
+   *  enviada de madrugada (a cirurgia pode ter sido no dia anterior) ou entre 19h e 7h em dia útil (o adicional de 30%
+   *  depende da hora). No fim de semana e no feriado o dia inteiro conta, e de dia o mais provável é o horário normal. */
+  function avisosDoEnvio(date, time, extraHol) {
+    if (!date || !time) return [];
+    const h = +time.slice(0, 2);
+    if (h < 6) return ['Confira a data'];
+    if (isUrgent(date, null, extraHol) !== true && (h >= 19 || h < 7)) return ['Confira a hora'];
+    return [];
+  }
   function recordFromEntry(e, index, opts) {
     opts = opts || {};
     const p = parseCaption(e.caption, index, e.date);
     const rec = {
       id: uid('r'), key: e.key, origem: 'whatsapp', grupo: opts.chatName || '',
-      date: p.date || e.date, time: p.date ? (p.time || null) : (p.time || e.time),
+      date: p.date || e.date, time: p.time || null,
       msgDate: e.date, msgTime: e.time,
       procs: p.procs.slice(), hosp: p.hosp, cols: p.cols.slice(), conv: p.conv, funcao: null,
       valorPrevisto: p.valor, status: 'aberto', recebido: null, rep: [],
@@ -386,6 +426,7 @@
     }
     if (!rec.procs.length) rec.revisar.push('Sem procedimento');
     if (p.unknown.some((u) => u.guess === T.PROC)) rec.revisar.push('Procedimento novo');
+    if (!p.time && !p.date) rec.revisar.push(...avisosDoEnvio(e.date, e.time, opts.feriados));
     return rec;
   }
 
@@ -533,7 +574,9 @@
   function excelDate(v) {
     if (typeof v === 'number' && isFinite(v) && v > 20000 && v < 80000) {
       const ms = Math.round(v * 86400000); const dt = new Date(Date.UTC(1899, 11, 30) + ms);
-      return { date: ymd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate()), time: `${pad2(dt.getUTCHours())}:${pad2(dt.getUTCMinutes())}` };
+      // só a data, sem fração do dia: a hora fica em branco, e não meia-noite (que contaria como urgência)
+      const temHora = v - Math.floor(v) > 1 / 172800;
+      return { date: ymd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate()), time: temHora ? `${pad2(dt.getUTCHours())}:${pad2(dt.getUTCMinutes())}` : null };
     }
     const s = String(v || '').trim();
     let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T](\d{1,2}):(\d{2}))?/);
@@ -618,7 +661,12 @@
     const n = norm(full); const first = n.split(' ')[0];
     const cols = index.terms.filter((t) => t.type === T.COL);
     for (const t of cols) if ([norm(t.name), ...(t.aliases || [])].includes(n)) return { term: t, how: 'exato' };
-    for (const t of cols) for (const a of [norm(t.name), ...(t.aliases || [])]) if (a && (n.startsWith(a + ' ') || a.split(' ')[0] === first && a.length > 2)) return { term: t, how: 'nome' };
+    // mesmo primeiro nome: pode ser outra pessoa, então pede confirmação. Se o colega já tem outro nome completo com esse
+    // primeiro nome, o mais provável é que seja outra pessoa (outroNome).
+    for (const t of cols) for (const a of [norm(t.name), ...(t.aliases || [])]) if (a && (n.startsWith(a + ' ') || a.split(' ')[0] === first && a.length > 2)) {
+      const completos = [norm(t.name), ...(t.aliases || [])].filter((x) => x.includes(' ') && x.split(' ')[0] === first);
+      return { term: t, how: 'primeiro-nome', outroNome: completos.length > 0 };
+    }
     for (const t of cols) for (const a of [norm(t.name), ...(t.aliases || [])]) {
       const af = a.split(' ')[0];
       if (af.length >= 4 && first.length >= 4 && levenshtein(af, first) <= 1) return { term: t, how: 'parecido' };
@@ -636,6 +684,9 @@
     }
     return [...acts.values()];
   }
+  // Para casar a planilha com as fichas, a hora do envio ainda ajuda como pista (a ordem das mensagens segue a ordem das
+  // cirurgias), mesmo sem valer como hora da cirurgia.
+  const horaPista = (rec) => rec.time || (rec.msgTime && rec.msgDate === rec.date ? rec.msgTime : null);
   function scorePair(act, rec, ctx) {
     const dd = Math.abs(dayNum(act.date) - dayNum(rec.date));
     if (dd > 1) return -99;
@@ -647,8 +698,9 @@
       const fam = rec.procs.some((p) => fams.has(famOf(ctx.index, p)));
       if (exact) { s += 3; why.push('procedimento'); } else if (fam) { s += 2; why.push('procedimento'); } else s -= 2;
     }
-    if (act.time && rec.time && dd === 0) {
-      const dm = Math.abs(minutesOf(act.date, act.time) - minutesOf(rec.date, rec.time));
+    const rt = horaPista(rec);
+    if (act.time && rt && dd === 0) {
+      const dm = Math.abs(minutesOf(act.date, act.time) - minutesOf(rec.date, rt));
       if (dm <= 90) s += 2; else if (dm <= 240) s += 1;
     }
     if (ctx.hosp && rec.hosp && rec.hosp !== ctx.hosp) s -= 3;
@@ -667,7 +719,7 @@
     const open = records.filter((r) => r.status === 'aberto');
     const pairs = [];
     acts.forEach((a, ai) => open.forEach((r) => { const sc = scorePair(a, r, { index, hosp: opts.hosp }); if (sc >= 5) pairs.push({ ai, r, sc }); }));
-    pairs.sort((x, y) => y.sc - x.sc || Math.abs(minutesOf(acts[x.ai].date, acts[x.ai].time) - minutesOf(x.r.date, x.r.time)) - Math.abs(minutesOf(acts[y.ai].date, acts[y.ai].time) - minutesOf(y.r.date, y.r.time)));
+    pairs.sort((x, y) => y.sc - x.sc || Math.abs(minutesOf(acts[x.ai].date, acts[x.ai].time) - minutesOf(x.r.date, horaPista(x.r))) - Math.abs(minutesOf(acts[y.ai].date, acts[y.ai].time) - minutesOf(y.r.date, horaPista(y.r))));
     const usedA = new Set(), usedR = new Set();
     for (const p of pairs) {
       if (usedA.has(p.ai) || usedR.has(p.r.id)) continue;
@@ -725,7 +777,7 @@
   const api = {
     norm, stripMarks, pad2, ymd, dayNum, fromDayNum, minutesOf, weekday, todayStr, median, round2, uid, capFirst, sentenceCase, levenshtein,
     easter, isHoliday, isUrgent, parseExtraHolidays, T, TYPE_LABEL, defaultTerms, buildIndex, famOf,
-    parseCaption, parseChat, describeKey, groupMessages, collectUnknown, recordFromEntry,
+    parseCaption, parseChat, describeKey, keySlot, findEdited, groupMessages, collectUnknown, avisosDoEnvio, recordFromEntry,
     zipOpen, zipEntryBlob, zipEntryChecked, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
   };

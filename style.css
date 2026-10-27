@@ -254,6 +254,7 @@ button.rowbtn:active, button.ritem:active, .trow:active { opacity: .55; }
 .carousel .ph.add.only { width: 100%; max-width: none; aspect-ratio: auto; min-height: 84px; flex-direction: row; gap: 10px; border: 1.5px dashed var(--fill-2); background: none; }
 .r-title { font-family: var(--font-display); font-size: 25px; font-weight: 700; line-height: 1.18; letter-spacing: -.01em; }
 .r-sub { color: var(--muted); font-size: 15px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; }
+.r-note { color: var(--muted); font-size: 14px; margin-top: 4px; }
 .tag-night { display: inline-flex; align-items: center; gap: 5px; background: var(--night-soft); color: var(--night); border-radius: 999px; padding: 4px 10px 4px 8px; font-size: 13px; font-weight: 600; }
 .tag-night .ic { width: 15px; height: 15px; }
 .info .ir { display: flex; justify-content: space-between; gap: 14px; padding: 13px 0; position: relative; font-size: 16px; }

@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.7';
+  const VERSION = '1.8';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -228,6 +228,23 @@
         progresso(++i, ids.length);
       }
     } },
+    // Até a 1.7, sem hora na legenda, a ficha ficava com a hora do envio da foto como hora da cirurgia (item 16): uma
+    // cirurgia às 15h postada às 20h virava urgência. Agora essa hora fica em branco, e o app pede para conferir quando ela
+    // muda o valor. Se a ficha já foi paga por uma planilha com hora, vale a hora da planilha. Fichas em que ela mexeu na
+    // hora não mudam. As fichas são copiadas antes (meta 'copia-migracao-3').
+    { v: 3, nome: 'hora do envio não é hora da cirurgia', copia: ['records'], async run() {
+      const idx = C.buildIndex(S.terms); const hol = C.parseExtraHolidays(S.settings.feriados);
+      const mudar = [];
+      for (const r of S.records) {
+        if (r.origem !== 'whatsapp' || !r.msgTime || r.time !== r.msgTime || r.date !== r.msgDate || r.editadaEm) continue;
+        if (C.parseCaption(r.caption || '', idx, r.msgDate).time) continue;   // a hora estava escrita na legenda
+        const l = (r.rep || []).find((x) => x.time && x.date === r.date);
+        if (l) { r.time = l.time; r.horaDaPlanilha = true; }
+        else { r.time = null; r.revisar = uniq([...(r.revisar || []), ...C.avisosDoEnvio(r.msgDate, r.msgTime, hol)]); }
+        mudar.push(r);
+      }
+      await Store.putMany('records', mudar);
+    } },
   ];
   const DATA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].v;
   async function migrate() {
@@ -416,7 +433,14 @@
     return [r.hosp, com].filter(Boolean).join(', ');
   }
   const FLAG_TXT = { 'Sem procedimento': 'Falta dizer qual foi o procedimento.', 'Sem hospital': 'Falta dizer o hospital.', 'Sem colega': 'Falta dizer com quem foi.', 'Procedimento novo': 'O procedimento foi escrito de um jeito novo. Confira o nome.' };
-  const flagText = (f) => FLAG_TXT[f] || (/convers|observa/i.test(f) ? 'A legenda tem uma observação depois da cirurgia. Confira o procedimento.' : f);
+  function flagText(f, r) {
+    const envio = r && r.msgTime ? horaTxt(r.msgTime) : '';
+    if (f === 'Confira a hora') return `A legenda não diz a hora, e a foto foi enviada às ${envio}, no horário de urgência. Se a cirurgia foi depois das 19h ou antes das 7h, coloque a hora: o valor é 30% maior.`;
+    if (f === 'Confira a data') return `A foto foi enviada de madrugada, às ${envio}. Se a cirurgia foi no dia anterior, corrija a data e, se souber, a hora.`;
+    if (f === 'Legenda editada') return `A legenda foi editada no WhatsApp depois que você mexeu nesta ficha. Antes era: “${(r && r.legendaAnterior) || ''}”. Confira se a ficha continua certa.`;
+    return FLAG_TXT[f] || (/convers|observa/i.test(f) ? 'A legenda tem uma observação depois da cirurgia. Confira o procedimento.' : f);
+  }
+  const AVISOS_DE_HORA = ['Confira a hora', 'Confira a data'];
   const namesOf = (type) => S.terms.filter((t) => t.type === type).map((t) => t.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   function topUsed(kind, n) {
     const cnt = new Map();
@@ -901,10 +925,7 @@
         const v = await formDialog({ title: 'Aviso de atraso', text: 'Depois de quantos dias sem pagamento uma cirurgia aparece como atrasada?', fields: [{ id: 'd', label: 'Dias', type: 'number', inputmode: 'numeric', value: S.settings.alertDias }] });
         if (v && +v.d > 0) { S.settings.alertDias = Math.round(+v.d); await saveSettings(); render(); }
       }),
-      rowBtn('cal', 'night', 'Feriados da cidade', S.settings.feriados || 'Nenhum', async () => {
-        const v = await formDialog({ title: 'Feriados da cidade', text: 'Os feriados nacionais já contam. Quais outros dias contam como feriado para o adicional de 30%? Use dia/mês, separados por vírgula.', fields: [{ id: 'f', label: 'Datas', value: S.settings.feriados, placeholder: '31/08' }] });
-        if (v) { S.settings.feriados = v.f.trim(); await saveSettings(); derive(); render(); }
-      }),
+      rowBtn('cal', 'night', 'Feriados da cidade', feriadosTxt() || 'Nenhum', () => sheetFeriados()),
       rowBtn('lock', 'warn', 'Senha para abrir', S.settings.pinHash ? 'Ligada' : 'Desligada', () => sheetPin())]));
     out.push(h('div', { class: 'group' },
       h('div', { class: 'rowbtn' }, h('span', { class: 'bubble plain' }, icon('info')), h('span', { class: 't' }, 'Versão ' + VERSION, h('small', { id: 'storage-info' }, PREVIEW ? 'Prévia com cirurgias de exemplo. Nada fica salvo aqui.' : S.storage === 'memory' ? 'Nada está sendo salvo' : 'Os dados ficam só neste aparelho'))),
@@ -912,6 +933,38 @@
       h('button', { class: 'rowbtn danger', type: 'button', onclick: () => wipeAll() }, h('span', { class: 'bubble danger' }, icon('trash')), h('span', { class: 't' }, TESTE ? 'Apagar os dados de teste' : 'Apagar todos os dados'))));
     if (navigator.storage && navigator.storage.estimate && S.storage !== 'memory') navigator.storage.estimate().then((e) => { const el = $('#storage-info'); if (el && e.usage) el.textContent = `Os dados ficam só neste aparelho (${(e.usage / 1048576).toFixed(1).replace('.', ',')} MB)`; }).catch(() => {});
     return out;
+  }
+  // ---- feriados da cidade ----
+  // Guardados num texto só (como nas versões antigas): datas "31/08" (todo ano) ou "04/06/2026" (só naquele ano) e as
+  // palavras "carnaval" e "corpus christi", que o núcleo calcula pela Páscoa.
+  const ehCarnaval = (t) => C.norm(t) === 'carnaval', ehCorpus = (t) => C.norm(t).startsWith('corpus');
+  const partesFeriados = () => String(S.settings.feriados || '').split(/[,;]+/).map((t) => t.trim()).filter(Boolean);
+  function feriadosTxt() {
+    const ps = partesFeriados();
+    return [...ps.filter((t) => !ehCarnaval(t) && !ehCorpus(t)), ps.some(ehCarnaval) ? 'Carnaval' : null, ps.some(ehCorpus) ? 'Corpus Christi' : null].filter(Boolean).join(', ');
+  }
+  function sheetFeriados() {
+    const ps = partesFeriados();
+    let carnaval = ps.some(ehCarnaval), corpus = ps.some(ehCorpus);
+    let datas = ps.filter((t) => !ehCarnaval(t) && !ehCorpus(t)).join(', ');
+    return openSheet({ title: 'Feriados da cidade', back: true, render(api) {
+      const inp = h('input', { id: 'fer-datas', type: 'text', value: datas, placeholder: '31/08', autocomplete: 'off', oninput: (e) => { datas = e.target.value; } });
+      const opcao = (titulo, sub, val, set) => h('div', { class: 'qrow' }, h('div', { class: 'q' }, titulo, h('small', null, sub)),
+        seg([['sim', 'Conta'], ['nao', 'Não conta']], val ? 'sim' : 'nao', (v) => { set(v === 'sim'); api.update(); }, titulo));
+      return { body: [
+        h('p', { class: 'lead' }, 'Os feriados nacionais e a Sexta-feira Santa já contam. Escolha os outros dias que contam como feriado para o adicional de 30%.'),
+        h('div', { class: 'group' },
+          opcao('Carnaval', 'Segunda e terça. A data muda todo ano.', carnaval, (v) => { carnaval = v; }),
+          opcao('Corpus Christi', 'Uma quinta-feira. A data muda todo ano.', corpus, (v) => { corpus = v; })),
+        h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, field('Outros dias', inp, 'Separe por vírgula. 31/08 vale todo ano; 04/06/2026 vale só naquele ano.'))],
+        foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+          const itens = datas.split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean);
+          const ruins = itens.filter((t) => !C.parseExtraHolidays(t).length);
+          if (ruins.length) { toast(`Não entendi “${ruins[0]}”. Use dia/mês, como 31/08, ou dia/mês/ano.`, 4500); return; }
+          S.settings.feriados = [...itens, carnaval ? 'carnaval' : null, corpus ? 'corpus christi' : null].filter(Boolean).join(', ');
+          await saveSettings(); derive(); render(); api.close(true); toast('Feriados salvos.');
+        } }, 'Salvar') };
+    } });
   }
   async function wipeAll() {
     if (!(await confirmDialog({ title: TESTE ? 'Apagar os dados de teste?' : 'Apagar todos os dados?', text: TESTE ? 'Saem só os dados do modo de teste. O app de verdade não muda.' : 'Saem do app as cirurgias, as fotos, os nomes e as planilhas. Se quiser guardar uma cópia, faça um backup antes.', ok: 'Continuar', danger: true }))) return;
@@ -968,9 +1021,12 @@
     function renderView() {
       const kids = [photosRow(d, false)];
       kids.push(h('div', null, h('h1', { class: 'r-title' }, procText(d)),
-        h('div', { class: 'r-sub' }, h('span', null, cap(dataLonga(d.date, { ano: true })) + (d.time ? ', às ' + horaTxt(d.time) : '')), urgOf(d) ? h('span', { class: 'tag-night' }, icon('moon'), 'Horário de urgência') : null)));
+        h('div', { class: 'r-sub' }, h('span', null, cap(dataLonga(d.date, { ano: true })) + (d.time ? ', às ' + horaTxt(d.time) : '')), urgOf(d) ? h('span', { class: 'tag-night' }, icon('moon'), 'Horário de urgência') : null),
+        // de onde veio a hora: da planilha de repasse, ou nenhuma (a hora do envio não vale como hora da cirurgia)
+        d.horaDaPlanilha ? h('div', { class: 'r-note' }, 'Data e hora pela planilha de repasse.')
+          : !d.time && d.msgTime && d.msgDate === d.date ? h('div', { class: 'r-note' }, `Hora não informada. A foto foi enviada às ${horaTxt(d.msgTime)}.`) : null));
       const pend = pendencias(d);
-      if (pend.length) kids.push(h('div', { class: 'checkcard' }, h('b', null, icon('alert', 'sm'), 'Para completar'), pend.map((f) => h('p', null, flagText(f))),
+      if (pend.length) kids.push(h('div', { class: 'checkcard' }, h('b', null, icon('alert', 'sm'), 'Para completar'), pend.map((f) => h('p', null, flagText(f, d))),
         h('div', { class: 'btnrow' }, h('button', { class: 'btn sm soft', type: 'button', onclick: startEdit }, 'Completar'),
           h('button', { class: 'btn sm', type: 'button', onclick: async () => { d.revisar = []; d.conferido = true; await persist(); toast('Pronto. Ela sai de Para completar.'); } }, 'Está tudo certo'))));
       kids.push(payCard(d, persist));
@@ -978,7 +1034,8 @@
       if (info.length) kids.push(h('div', { class: 'group info' }, info.map(([k, v]) => h('div', { class: 'ir' }, h('span', null, k), h('span', null, v)))));
       if (d.rep && d.rep.length) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Na planilha de repasse')),
         h('div', { class: 'group flat' }, d.rep.map((l) => rowBtn(null, null, l.procName, [l.conv, l.funcao].filter(Boolean).join(', '), null, h('span', { class: 'v' }, brl(l.valor)))))));
-      if (d.caption) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Legenda no WhatsApp')), h('div', { class: 'caption-box' }, d.caption)));
+      if (d.caption) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Legenda no WhatsApp')), h('div', { class: 'caption-box' }, d.caption),
+        d.legendaAnterior ? h('p', { class: 'note' }, `Editada no WhatsApp. Antes era: “${d.legendaAnterior}”.`) : null));
       kids.push(h('div', { class: 'group' },
         h('button', { class: 'rowbtn', type: 'button', onclick: () => mergeInto(d, api) }, h('span', { class: 'bubble plain' }, icon('merge')), h('span', { class: 't' }, 'Juntar com outra ficha', h('small', null, 'Quando a mesma cirurgia aparece duas vezes')), icon('chev', 'chev')),
         h('button', { class: 'rowbtn danger', type: 'button', onclick: async () => {
@@ -1027,6 +1084,9 @@
       for (const f of pendingAdds) f();
       if (!x.date) { toast('Coloque a data da cirurgia.'); return; }
       if (x.procs.length) x.revisar = (x.revisar || []).filter((f) => f !== 'Sem procedimento');
+      // ela viu a data e a hora no formulário: os avisos sobre a hora do envio saem
+      x.revisar = (x.revisar || []).filter((f) => !AVISOS_DE_HORA.includes(f));
+      if (x.horaDaPlanilha && (x.time !== d.time || x.date !== d.date)) delete x.horaDaPlanilha;
       const learned = await learnTerms(x);
       if (isNew) { S.settings.seq += 1; x.num = S.settings.seq; await saveSettings(); }
       await saveRecord(x); d = x; draft = null; added = []; dirty = false;
@@ -1440,7 +1500,15 @@
     for (const r of [...S.records]) {
       if (!(r.recebido && r.recebido.repId === doc.id)) continue;
       if (r.origem === 'repasse') criadas.push(r);
-      else { r.status = 'aberto'; r.recebido = null; r.rep = []; await saveRecord(r, { sistema: true }); }
+      else {
+        r.status = 'aberto'; r.recebido = null; r.rep = [];
+        if (r.antesDaPlanilha) {
+          const ap = r.antesDaPlanilha; r.date = ap.date; r.time = ap.time;
+          r.revisar = uniq([...(r.revisar || []), ...(ap.avisos || [])]);
+          delete r.antesDaPlanilha; delete r.horaDaPlanilha;
+        }
+        await saveRecord(r, { sistema: true });
+      }
     }
     await apagarFichasDeVez(criadas);
     S.repasses = S.repasses.filter((x) => x.id !== doc.id); await Store.del('repasses', doc.id);
@@ -1513,23 +1581,35 @@
     const me = [...senders.entries()].sort((a, b) => b[1] - a[1])[0];
     if (!S.settings.nome && me && !PREVIEW) S.settings.nome = C.capFirst(me[0].split(/\s+/)[0]);
     if (chat.chatName && (!me || chat.chatName !== me[0])) S.settings.grupo = chat.chatName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').trim();
-    const byKey = () => new Map(S.records.filter((r) => r.key).map((r) => [r.key, r]));
+    // cada ficha pela chave da mensagem (e pelas chaves antigas, de antes de a legenda ser editada)
+    const byKey = () => new Map(S.records.flatMap((r) => [r.key, ...(r.chavesAntigas || [])].filter(Boolean).map((k) => [k, r])));
     // o que é novo nesta conversa. Fotos sem legenda vão uma a uma: cada foto tem a sua chave (com "~n" quando a mesma
     // mensagem traz mais de uma), e a que já está no app, na lixeira ou foi ignorada não entra de novo.
     const plan = () => {
       const ex = byKey(); const lk = new Set(S.loose.map((l) => l.key));
       for (const x of S.trash) for (const l of x.loose || []) if (l.key) lk.add(l.key);
-      const entries = g.entries.filter((e) => !ex.has(e.key) && !S.ignored.has(e.key));
+      // legenda editada no WhatsApp: a chave mudou, mas é a mesma mensagem (mesma hora exata e número de fotos)
+      const ignLugar = new Set([...S.ignored].map((k) => C.keySlot(k)).filter(Boolean));
+      const entries = [], editadas = [];
+      for (const e of g.entries) {
+        if (ex.has(e.key) || S.ignored.has(e.key)) continue;
+        if (e.editada) {
+          const r = C.findEdited(e, S.records);
+          if (r) { editadas.push({ e, r }); continue; }
+          if (ignLugar.has(C.keySlot(e.key))) continue;   // ela tinha excluído essa cirurgia antes da edição
+        }
+        entries.push(e);
+      }
       const fill = zip ? g.entries.filter((e) => ex.has(e.key) && !ex.get(e.key).photoIds.length && e.photos.length) : [];
       const loose = [];
       if (zip) for (const l of g.loose) {
         if (S.ignored.has(l.key)) continue;
         l.photos.forEach((name, i) => { const key = l.photos.length > 1 ? `${l.key}~${i}` : l.key; if (!lk.has(key) && !S.ignored.has(key)) loose.push({ key, date: l.date, time: l.time, name }); });
       }
-      return { entries, fill, loose, ex };
+      return { entries, editadas, fill, loose, ex };
     };
     let p = plan();
-    const unknown = C.collectUnknown(p.entries, S.index);
+    const unknown = C.collectUnknown([...p.entries, ...p.editadas.map((x) => x.e)], S.index);
     const choice = new Map(unknown.map((u) => [u.norm, u.guess]));
     const st = { step: unknown.length ? 'termos' : 'resumo', done: null };
     let recs = [];
@@ -1549,31 +1629,37 @@
           } }, 'Continuar') };
       }
       if (st.step === 'resumo') {
-        recs = p.entries.map((e) => C.recordFromEntry(e, S.index, { chatName: chat.chatName }));
+        recs = p.entries.map((e) => C.recordFromEntry(e, S.index, { chatName: chat.chatName, feriados: S.hol }));
         const nPh = recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0);
         const nLoose = p.loose.length;
         const rev = recs.filter((r) => pendencias(r).length).length;
         const dates = recs.map((r) => r.date).sort();
-        if (!recs.length && !nLoose && !p.fill.length) {
+        const nEd = p.editadas.length;
+        if (!recs.length && !nLoose && !p.fill.length && !nEd) {
           // uma importação que tinha parado no meio e não tem mais nada a trazer está, na prática, terminada
           const parada = S.imports.find((x) => x.estado === 'andamento');
           if (parada) { parada.estado = 'pronta'; parada.fim = Date.now(); Store.put('imports', parada).then(() => render()).catch(() => {}); }
           return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Nada de novo'), h('p', null, 'Tudo o que está nessa conversa já está no app.'))], foot: h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Fechar') };
         }
         return { body: [
-          h('div', null, h('h1', { class: 'bigtitle' }, recs.length ? plural(recs.length, 'cirurgia encontrada', 'cirurgias encontradas') : 'Fotos novas'),
+          h('div', null, h('h1', { class: 'bigtitle' }, recs.length ? plural(recs.length, 'cirurgia encontrada', 'cirurgias encontradas') : nEd && !nLoose && !p.fill.length ? plural(nEd, 'legenda editada', 'legendas editadas') : 'Fotos novas'),
             dates.length ? h('p', { class: 'muted', style: 'margin-top:6px' }, `De ${dataLonga(dates[0], { semDia: true, ano: true })} a ${dataLonga(dates[dates.length - 1], { semDia: true, ano: true })}`) : null),
-          h('div', { class: 'statgrid' }, h('div', null, h('b', null, nPh), h('span', null, nPh === 1 ? 'foto' : 'fotos')), h('div', null, h('b', null, nLoose), h('span', null, 'para organizar')), h('div', null, h('b', null, rev), h('span', null, 'para completar'))),
-          zip ? null : tip('Arquivo sem fotos', ' As cirurgias entram sem fotos. Para trazê-las, exporte de novo escolhendo Anexar mídia.', null, null, 'photo', 'warn'),
+          // só legendas editadas: sem contagem de fotos nem aviso de arquivo sem fotos
+          recs.length || nLoose || p.fill.length ? h('div', { class: 'statgrid' }, h('div', null, h('b', null, nPh), h('span', null, nPh === 1 ? 'foto' : 'fotos')), h('div', null, h('b', null, nLoose), h('span', null, 'para organizar')), h('div', null, h('b', null, rev), h('span', null, 'para completar'))) : null,
+          zip || !recs.length ? null : tip('Arquivo sem fotos', ' As cirurgias entram sem fotos. Para trazê-las, exporte de novo escolhendo Anexar mídia.', null, null, 'photo', 'warn'),
           recs.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Veja como ficou')), h('div', { class: 'group' }, [...recs].sort(byDateDesc).slice(0, 40).map((r) => recordItem({ ...r, photoIds: r.photoNames }, () => {})))) : null,
-          recs.length > 40 ? h('p', { class: 'note' }, `E mais ${recs.length - 40}.`) : null],
+          recs.length > 40 ? h('p', { class: 'note' }, `E mais ${recs.length - 40}.`) : null,
+          nEd ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Legendas editadas no WhatsApp')),
+            h('p', { class: 'note' }, 'São cirurgias que já estão no app. A ficha recebe a legenda nova; se você já tinha mexido nela, ela aparece em Para completar para você conferir.'),
+            h('div', { class: 'group' }, p.editadas.map(({ e, r }) => h('div', { class: 'ritem lx' }, dateBadge(r),
+              h('span', { class: 'rmain' }, h('span', { class: 'p' }, e.caption), h('span', { class: 'm' }, `Antes: ${r.caption}`)))))) : null],
           foot: h('button', { class: 'btn primary', type: 'button', onclick: () => runImport(api) }, 'Trazer para o app') };
       }
       if (st.step === 'importando') return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('photo')), h('p', { id: 'imp-lab' }, 'Guardando…'), h('div', { class: 'progress', style: 'width:100%' }, h('span', { id: 'imp-bar' })))] };
       const dn = st.done;
-      const extras = [dn.loose ? plural(dn.loose, 'foto para organizar', 'fotos para organizar') : null, dn.rev ? plural(dn.rev, 'para completar', 'para completar') : null, dn.fill ? `fotos em ${plural(dn.fill, 'cirurgia', 'cirurgias')} que já estavam no app` : null, dn.err ? `${dn.err} fotos não puderam ser lidas` : null].filter(Boolean);
-      return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${plural(dn.recs, 'cirurgia nova', 'cirurgias novas')} no app.`), extras.length ? h('p', null, cap(extras.join(', ')) + '.') : null),
-        !PREVIEW && (dn.recs || dn.loose) ? tip('Faça um backup agora', ' Depois do backup, o arquivo da conversa que você salvou em Arquivos já pode ser apagado do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null,
+      const extras = [dn.loose ? plural(dn.loose, 'foto para organizar', 'fotos para organizar') : null, dn.rev ? plural(dn.rev, 'para completar', 'para completar') : null, dn.fill ? `fotos em ${plural(dn.fill, 'cirurgia', 'cirurgias')} que já estavam no app` : null, dn.edit ? plural(dn.edit, 'legenda editada atualizada', 'legendas editadas atualizadas') : null, dn.err ? `${dn.err} fotos não puderam ser lidas` : null].filter(Boolean);
+      return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), dn.recs ? h('p', null, `${plural(dn.recs, 'cirurgia nova', 'cirurgias novas')} no app.`) : null, extras.length ? h('p', null, cap(extras.join(', ')) + '.') : null),
+        !PREVIEW && (dn.recs || dn.loose || dn.edit) ? tip('Faça um backup agora', ' Depois do backup, o arquivo da conversa que você salvou em Arquivos já pode ser apagado do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null,
         h('button', { class: 'link', type: 'button', 'data-act': 'desfazer-importacao', onclick: async () => { const imp = S.imports.find((x) => x.id === dn.impId); if (imp && (await desfazerImportacao(imp, true))) { api.close(true); go('inicio'); toast('Importação desfeita.'); } } }, 'Desfazer esta importação')],
         foot: [dn.loose ? h('button', { class: 'btn', type: 'button', onclick: () => { api.close(true); sheetLoose(); } }, 'Organizar fotos') : null, h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', {}); } }, 'Ver cirurgias')] };
     } });
@@ -1584,7 +1670,9 @@
       st.step = 'importando'; api.update();
       const lab = () => $('#imp-lab'), bar = () => $('#imp-bar');
       const entryOf = new Map(zip ? zip.entries.map((e) => [e.base, e]) : []);
-      const total = Math.max(1, recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0) + p.loose.length);
+      const precisaFotos = (r, e) => zip && !(r.photoIds || []).length && e.photos.length;
+      const total = Math.max(1, recs.reduce((s, r) => s + r.photoNames.length, 0) + p.fill.reduce((s, e) => s + e.photos.length, 0) + p.loose.length
+        + p.editadas.reduce((s, { e, r }) => s + (precisaFotos(r, e) ? e.photos.length : 0), 0));
       let n = 0, err = 0;
       const one = async (name) => {
         n++; if (lab()) lab().textContent = `Guardando foto ${n} de ${total}`; if (bar()) bar().style.width = Math.round((n / total) * 100) + '%';
@@ -1594,14 +1682,31 @@
       // a importação que parou no meio continua com o mesmo número: desfazer depois tira tudo de uma vez
       let imp = S.imports.find((x) => x.estado === 'andamento');
       if (!imp) { imp = { id: C.uid('i'), inicio: Date.now(), arquivo: (file && file.name) || '', grupo: S.settings.grupo || '', fill: [] }; S.imports.push(imp); }
-      imp.estado = 'andamento'; imp.fim = null; imp.fill = imp.fill || [];
+      imp.estado = 'andamento'; imp.fim = null; imp.fill = imp.fill || []; imp.editadas = imp.editadas || [];
       await Store.put('imports', imp);
-      let feitas = 0, fotosSoltas = 0; const filled = [];
+      let feitas = 0, fotosSoltas = 0, editadasFeitas = 0; const filled = [];
       for (const r of recs) {
         for (const nm of r.photoNames) { const id = zip ? await one(nm) : null; if (id) r.photoIds.push(id); }
         S.settings.seq += 1; r.num = S.settings.seq; r.importId = imp.id; r.createdAt = r.updatedAt = Date.now();
         await Store.apply([{ s: 'records', put: r }, { s: 'meta', put: S.settings }]);   // a ficha entra junto com o número dela
         S.records.push(r); feitas++;
+      }
+      // legendas editadas: a ficha que já existe recebe a legenda nova. Se ela ainda não foi mexida (nem paga), o app relê
+      // a legenda inteira; se foi, só troca o texto e pede para conferir. A versão de antes fica na importação, para desfazer.
+      for (const { e, r: r0 } of p.editadas) {
+        const i = S.records.findIndex((x) => x.id === r0.id); if (i < 0) continue;
+        const r = S.records[i];
+        const novo = C.recordFromEntry(e, S.index, { chatName: chat.chatName, feriados: S.hol });
+        const upd = { ...r, caption: novo.caption, legendaAnterior: r.caption, chavesAntigas: uniq([...(r.chavesAntigas || []), r.key]), key: e.key, updatedAt: Date.now() };
+        if (r.status === 'aberto' && !r.editadaEm) Object.assign(upd, { date: novo.date, time: novo.time, msgDate: novo.msgDate, msgTime: novo.msgTime, procs: novo.procs, hosp: novo.hosp, cols: novo.cols, conv: novo.conv, valorPrevisto: novo.valorPrevisto, notas: novo.notas, revisar: novo.revisar, omitted: novo.omitted });
+        else upd.revisar = uniq([...(r.revisar || []), 'Legenda editada']);
+        if (precisaFotos(r, e)) {
+          const novas = []; for (const nm of e.photos) { const id = await one(nm); if (id) novas.push(id); }
+          upd.photoIds = novas; if (novas.length) imp.fill.push({ recId: r.id, photoIds: novas });
+        }
+        imp.editadas.push({ recId: r.id, antes: clone(r), em: upd.updatedAt });   // em: para saber, ao desfazer, se ela mudou depois
+        await Store.apply([{ s: 'records', put: upd }, { s: 'imports', put: imp }]);
+        S.records[i] = upd; editadasFeitas++;
       }
       for (const e of p.fill) {
         const r = p.ex.get(e.key); const novas = [];
@@ -1619,7 +1724,7 @@
       imp.estado = 'pronta'; imp.fim = Date.now();
       await Store.put('imports', imp);
       await saveSettings(); persistStorage(); derive(); render();
-      st.done = { recs: feitas, loose: fotosSoltas, rev: recs.filter((r) => pendencias(r).length).length, fill: filled.length, err, impId: imp.id };
+      st.done = { recs: feitas, loose: fotosSoltas, rev: recs.filter((r) => pendencias(r).length).length, fill: filled.length, edit: editadasFeitas, err, impId: imp.id };
       st.step = 'pronto'; api.update();
     }
   }
@@ -1634,18 +1739,32 @@
     const fill = (x.fill || []).map((f) => { const r = S.records.find((y) => y.id === f.recId && y.importId !== x.id); return r ? { r, ids: f.photoIds.filter((id) => (r.photoIds || []).includes(id)) } : null; }).filter((f) => f && f.ids.length);
     const fotos = recs.reduce((s, r) => s + (r.photoIds || []).length, 0) + loose.length + fill.reduce((s, f) => s + f.ids.length, 0);
     const mexidas = recs.filter((r) => r.status !== 'aberto' || r.editadaEm).length;
-    return { recs, loose, fill, fotos, mexidas };
+    const editadas = (x.editadas || []).filter((ed) => S.records.some((r) => r.id === ed.recId && r.importId !== x.id));
+    return { recs, loose, fill, fotos, mexidas, editadas };
   }
   async function desfazerImportacao(x, perguntar) {
     const z = resumoImportacao(x);
     if (perguntar) {
       const mex = z.mexidas ? (z.mexidas === 1 ? ' Uma delas já tinha mudanças suas, como um pagamento, que também saem.' : ` ${z.mexidas} delas já tinham mudanças suas, como pagamentos, que também saem.`) : '';
-      const ok = await confirmDialog({ title: 'Desfazer esta importação?', text: `Saem do app ${plural(z.recs.length, 'cirurgia', 'cirurgias')} e ${plural(z.fotos, 'foto', 'fotos')} que ela trouxe.${mex} Se você trouxer a conversa de novo, elas voltam.`, ok: 'Desfazer', danger: true });
+      const ed = z.editadas.length ? ` ${z.editadas.length === 1 ? 'A legenda editada volta' : `As ${z.editadas.length} legendas editadas voltam`} a ser como era${z.editadas.length === 1 ? '' : 'm'}.` : '';
+      const ok = await confirmDialog({ title: 'Desfazer esta importação?', text: `Saem do app ${plural(z.recs.length, 'cirurgia', 'cirurgias')} e ${plural(z.fotos, 'foto', 'fotos')} que ela trouxe.${mex}${ed} Se você trouxer a conversa de novo, elas voltam.`, ok: 'Desfazer', danger: true });
       if (!ok) return false;
     }
     const fotos = [...z.recs.flatMap((r) => r.photoIds || []), ...z.loose.map((l) => l.photoId)];
     const ops = [...z.recs.map((r) => ({ s: 'records', del: r.id })), ...z.loose.map((l) => ({ s: 'loose', del: l.id })), { s: 'imports', del: x.id }];
-    const mudadas = z.fill.map((f) => { const tira = new Set(f.ids); fotos.push(...f.ids); return { ...f.r, photoIds: f.r.photoIds.filter((id) => !tira.has(id)), updatedAt: Date.now() }; });
+    const voltam = new Map(z.editadas.map((ed) => [ed.recId, ed]));   // a ficha de antes da legenda editada
+    const mudadas = z.fill.filter((f) => !voltam.has(f.r.id)).map((f) => { const tira = new Set(f.ids); fotos.push(...f.ids); return { ...f.r, photoIds: f.r.photoIds.filter((id) => !tira.has(id)), updatedAt: Date.now() }; });
+    for (const f of z.fill) if (voltam.has(f.r.id)) fotos.push(...f.ids);
+    for (const ed of voltam.values()) {
+      const r = S.records.find((y) => y.id === ed.recId); if (!r) continue;
+      if (r.updatedAt === ed.em) { mudadas.push(ed.antes); continue; }   // nada mudou depois: a ficha volta inteira
+      // ela mudou a ficha depois (pagamento, edição): volta só a legenda, e saem as fotos que esta importação pôs
+      const f = z.fill.find((y) => y.r.id === r.id); const tira = new Set(f ? f.ids : []);
+      const v = { ...r, caption: ed.antes.caption, key: ed.antes.key, photoIds: (r.photoIds || []).filter((id) => !tira.has(id)), updatedAt: Date.now() };
+      for (const k of ['chavesAntigas', 'legendaAnterior']) { if (ed.antes[k] !== undefined) v[k] = ed.antes[k]; else delete v[k]; }
+      if (!(ed.antes.revisar || []).includes('Legenda editada')) v.revisar = (v.revisar || []).filter((y) => y !== 'Legenda editada');
+      mudadas.push(v);
+    }
     for (const r of mudadas) ops.push({ s: 'records', put: r });
     await Store.apply(ops);
     const saiRec = new Set(z.recs.map((r) => r.id)), saiLoose = new Set(z.loose.map((l) => l.id));
@@ -1663,7 +1782,7 @@
       return { body: [h('p', { class: 'lead' }, 'Cada vez que você traz a conversa, o app guarda o que ela trouxe. Desfazer tira essas cirurgias e fotos de uma vez.'),
         h('div', { class: 'group' }, lista.map((x) => { const z = resumoImportacao(x);
           const sub = x.estado === 'andamento' ? 'Não terminou. Escolha o arquivo da conversa de novo para continuar.'
-            : z.recs.length || z.fotos ? `${plural(z.recs.length, 'cirurgia', 'cirurgias')} e ${plural(z.fotos, 'foto', 'fotos')}` : 'Nada dela continua no app.';
+            : z.recs.length || z.fotos || z.editadas.length ? [z.recs.length || z.fotos ? `${plural(z.recs.length, 'cirurgia', 'cirurgias')} e ${plural(z.fotos, 'foto', 'fotos')}` : null, z.editadas.length ? plural(z.editadas.length, 'legenda editada', 'legendas editadas') : null].filter(Boolean).join(', ') : 'Nada dela continua no app.';
           return h('div', { class: 'rowbtn' }, h('span', { class: 'bubble ok' }, icon('chat')),
             h('span', { class: 't' }, `Trazida em ${ddmmyyyy(C.todayStr(new Date(x.inicio)))}`, h('small', null, sub)),
             h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (await desfazerImportacao(x, true)) { api.update(); toast('Importação desfeita.'); } } }, 'Desfazer'));
@@ -1694,7 +1813,22 @@
     const st = { step: S.repasses.some((x) => x.id === rep.id) ? 'repetido' : 'plano', hosp: S.settings.hospRepasse || (hosps.includes('UMC') ? 'UMC' : hosps[0] || ''), quando: 'hoje', pay: today(), over: new Map(), unlink: new Set() };
     const execs = uniq(rep.lines.map((l) => l.exec));
     const colNames = namesOf('col');
-    for (const ex of execs) { const m = C.mapExecutor(ex, S.index); st.over.set(ex, m ? { col: m.term.name, how: m.how } : { col: '__novo__', how: 'novo', novo: firstName(ex, colNames) }); }
+    // nome completo com o mesmo primeiro nome de um colega: pergunta. Se o colega já tem outro nome completo, o app parte
+    // de "colega novo" e deixa escolher o colega, se for a mesma pessoa.
+    // Dois nomes completos diferentes com o mesmo primeiro nome na mesma planilha: o segundo também parte de "colega novo".
+    const nomeNaPlanilha = new Map();
+    for (const ex of execs) {
+      const m = C.mapExecutor(ex, S.index);
+      let outra = false;
+      if (m && m.how === 'primeiro-nome') {
+        const visto = nomeNaPlanilha.get(m.term.name);
+        outra = m.outroNome || (visto != null && visto !== C.norm(ex));
+        if (visto == null) nomeNaPlanilha.set(m.term.name, C.norm(ex));
+      }
+      st.over.set(ex, !m ? { col: '__novo__', how: 'novo', novo: firstName(ex, colNames) }
+        : outra ? { col: '__novo__', how: 'novo', novo: firstName(ex, colNames), suspeita: m.term.name }
+          : { col: m.term.name, how: m.how });
+    }
     const tempIndex = () => {
       const terms = S.terms.map((t) => ({ ...t, aliases: [...(t.aliases || [])] }));
       for (const [ex, o] of st.over) { const n = C.norm(ex); if (o.col === '__novo__') terms.push({ id: 'tmp' + n, type: 'col', name: o.novo, aliases: [n] }); else { const t = terms.find((x) => x.type === 'col' && x.name === o.col); if (t) t.aliases.push(n); } }
@@ -1718,7 +1852,7 @@
       }
       const matched = acts.filter((a) => a.recordId && !st.unlink.has(a.recordId));
       const fresh = acts.filter((a) => !a.recordId || st.unlink.has(a.recordId));
-      const doubtful = execs.filter((ex) => { const o = st.over.get(ex); return o.how === 'parecido' || o.how === 'novo' || o.forced; });
+      const doubtful = execs.filter((ex) => { const o = st.over.get(ex); return o.how === 'parecido' || o.how === 'primeiro-nome' || o.how === 'novo' || o.forced; });
       const payIn = h('input', { type: 'date', value: st.pay, 'aria-label': 'Dia em que o dinheiro caiu', oninput: (e) => { st.pay = e.target.value; } });
       const smallLink = (label, fn) => h('button', { class: 'link', type: 'button', style: 'padding:2px 0;font-size:14px', onclick: fn }, label);
       const actLine = (a, r) => h('div', { class: 'ritem', style: 'cursor:default' }, dateBadge(a),
@@ -1737,8 +1871,11 @@
         doubtful.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Confirme os nomes')), h('div', { class: 'group' }, doubtful.map((ex) => { const o = st.over.get(ex);
           const pickSel = h('select', { 'aria-label': 'Quem é ' + ex, onchange: (e) => { st.over.set(ex, e.target.value === '__novo__' ? { col: '__novo__', how: 'novo', novo: firstName(ex, colNames), forced: true } : { col: e.target.value, how: 'escolhido', forced: true }); replan(); api.update(); } },
             colNames.map((c) => h('option', { value: c, selected: o.col === c }, c)), h('option', { value: '__novo__', selected: o.col === '__novo__' }, 'Colega novo: ' + firstName(ex, colNames)));
-          return h('div', { class: 'qrow' }, h('div', { class: 'q' }, ex, h('small', null, o.how === 'parecido' ? `É ${o.col}?` : o.col === '__novo__' ? 'Vai entrar como colega novo.' : `Ligado a ${o.col}.`)),
-            o.how === 'parecido' ? seg([['sim', 'Sim'], ['nao', 'Não, é outra pessoa']], 'sim', (v) => { if (v === 'nao') { st.over.set(ex, { col: '__novo__', how: 'novo', novo: firstName(ex, colNames), forced: true }); replan(); api.update(); } }, 'É a mesma pessoa?') : pickSel); }))) : null,
+          const pergunta = o.how === 'parecido' || o.how === 'primeiro-nome';
+          const sub = pergunta ? (o.how === 'primeiro-nome' ? `É a mesma pessoa que ${o.col}?` : `É ${o.col}?`)
+            : o.col === '__novo__' ? (o.suspeita && !o.forced ? `Tem o mesmo primeiro nome de ${o.suspeita}, mas parece outra pessoa. Vai entrar como colega novo; se for ${o.suspeita}, escolha abaixo.` : 'Vai entrar como colega novo.') : `Ligado a ${o.col}.`;
+          return h('div', { class: 'qrow' }, h('div', { class: 'q' }, ex, h('small', null, sub)),
+            pergunta ? seg([['sim', 'Sim'], ['nao', 'Não, é outra pessoa']], 'sim', (v) => { if (v === 'nao') { st.over.set(ex, { col: '__novo__', how: 'novo', novo: firstName(ex, colNames), forced: true }); replan(); api.update(); } }, 'É a mesma pessoa?') : pickSel); }))) : null,
         h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Já estavam no app')),
           h('p', { class: 'note' }, matched.length ? `Vão ficar como pagas (${matched.length}).` : 'Nenhuma cirurgia a receber do WhatsApp aparece nesta planilha.'),
           matched.length ? h('div', { class: 'group' }, matched.map((a) => actLine(a, S.records.find((x) => x.id === a.recordId)))) : null),
@@ -1771,7 +1908,12 @@
         const r = a.recordId && !st.unlink.has(a.recordId) ? S.records.find((x) => x.id === a.recordId) : null;
         if (r) {
           r.status = 'recebido'; r.recebido = pay; r.rep = lines;
-          if (!r.conv) r.conv = lines[0].conv; if (!r.funcao) r.funcao = lines[0].funcao; if (!r.time && a.time) r.time = a.time;
+          if (!r.conv) r.conv = lines[0].conv; if (!r.funcao) r.funcao = lines[0].funcao;
+          // a planilha é o registro do ato: valem a data e a hora dela (a de antes fica guardada para desfazer)
+          const saem = (r.revisar || []).filter((f) => f === 'Confira a data' || (a.time && f === 'Confira a hora'));
+          if (r.date !== a.date || (a.time && r.time !== a.time) || saem.length) { if (!r.antesDaPlanilha) r.antesDaPlanilha = { date: r.date, time: r.time, avisos: saem }; r.horaDaPlanilha = true; }
+          r.date = a.date; if (a.time) r.time = a.time;
+          r.revisar = (r.revisar || []).filter((f) => !saem.includes(f));
           if (!(r.cols || []).length && col) r.cols = [col]; if (!r.procs.length) r.procs = uniq(lines.map((l) => l.procName));
           if (!r.hosp && st.hosp) r.hosp = st.hosp;
           r.revisar = (r.revisar || []).filter((f) => f !== 'Sem procedimento'); r.updatedAt = Date.now();
@@ -2034,6 +2176,7 @@
     try { if (navigator.serviceWorker && navigator.serviceWorker.controller) sw = 'ligado'; if (window.caches) { const ks = await caches.keys(); if (ks.length) sw += ` (${ks.join(', ')})`; } } catch (e) { /* sem cache */ }
     let nFotos = '?', nMinis = '?'; try { nFotos = (await Store.keys('photos')).length; nMinis = (await Store.keys('thumbs')).length; } catch (e) { /* sem banco */ }
     const paradas = S.imports.filter((x) => x.estado === 'andamento').length;
+    let copias = ''; try { copias = (await Store.keys('meta')).map(String).filter((k) => k.startsWith('copia-migracao-')).map((k) => k.slice(15)).join(', '); } catch (e) { /* sem banco */ }
     const quando = (iso) => { const d = new Date(iso); const z = (n) => String(n).padStart(2, '0'); return `${z(d.getDate())}/${z(d.getMonth() + 1)}/${d.getFullYear()} ${z(d.getHours())}:${z(d.getMinutes())}`; };
     return [
       'Controle de Cirurgias: diagnóstico',
@@ -2045,6 +2188,7 @@
       `Fotos guardadas: ${nFotos} (miniaturas: ${nMinis}); fotos sem legenda: ${S.loose.length}`,
       `Nomes e abreviações: ${S.terms.length}; planilhas de repasse: ${S.repasses.length}; conversas importadas: ${S.imports.length}${paradas ? ` (${paradas} sem terminar)` : ''}`,
       `Lixeira: ${S.trash.length}; mensagens ignoradas: ${S.ignored.size}`,
+      `Cópias guardadas antes de migrações: ${copias || 'nenhuma'}`,
       `Último backup: ${S.settings.lastBackup ? ddmmyyyy(S.settings.lastBackup) : 'nunca'}`,
       `Senha para abrir: ${S.settings.pinHash ? 'ligada' : 'desligada'}`,
       `Uso sem internet: ${sw}`,
