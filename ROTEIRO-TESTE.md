@@ -14,6 +14,8 @@ No Safari do iPhone, abra cada endereço abaixo e toque em **Baixar**. Se abrir 
 
 Os três ficam em **Arquivos → Downloads**. São inventados: colegas Bruno, Lia e Otávio, pacientes fictícios.
 
+Desde a versão 1.11, **Ajustes** fica no ícone de engrenagem, no topo do **Início**. Onde o roteiro diz "Em Ajustes", toque nesse ícone.
+
 ## 1. Testes automáticos
 
 Abra `goborges.github.io/Carol_Controlecirurgias/testes/`.
@@ -57,9 +59,10 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 
 ## 5. Conferir as telas
 
-- **Início:** o cartão "Para receber" com valor; embaixo dele, "Recebido em" este mês com R$ 2.800, o que caiu na conta. Em "Para completar", cirurgias e fotos sem legenda.
+- **Início:** o cartão "Para receber" com valor; embaixo dele, "Recebido em" este mês com R$ 2.800, o que caiu na conta. Em "Precisa de atenção", no máximo 3 linhas: cirurgias para completar, fotos sem legenda e, se houver, cirurgias atrasadas. No topo, o ícone de engrenagem de **Ajustes**, com uma bolinha vermelha enquanto não houver backup.
+- **Barra de baixo:** Início · Cirurgias · + · Recebimentos · Relatórios.
+- **Recebimentos** (ou toque no cartão "Para receber"): o que falta receber, o que entrou no mês, "Quando deve cair", com os próximos 30, 60 e 90 dias, e o histórico, com a planilha nº 900001.
 - **Cirurgias:** 14 cirurgias.
-- **Relatórios → Meses:** a parte "Quando deve cair", com os próximos 30, 60 e 90 dias, pelo prazo de costume de quem paga.
 - **Relatórios → Tabela:** 14 linhas, da mais nova para a mais antiga.
 
 ## 6. Pagamento em parte
@@ -68,7 +71,7 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 2. **Deve aparecer:** "Falta receber R$ 250,00". Embaixo, o valor devido de R$ 350,00, o pagamento de R$ 100,00 e "Falta receber R$ 250,00".
 3. Toque em **Registrar pagamento**. O valor já vem com 250,00. Toque em **Confirmar**. **Deve aparecer** "Recebida", com os dois pagamentos.
 4. Toque em **Desfazer**. **Deve aparecer** de novo "Falta receber R$ 250,00". Feche a cirurgia.
-5. No **Início**, o cartão "Para receber" **deve mostrar** "R$ 250 confirmados + ≈ R$ … estimados".
+5. No **Início**, o cartão "Para receber" **deve mostrar** "R$ 250 confirmados + ≈ R$ … estimados". Em **Recebimentos**, a cirurgia aparece em "Pagas em parte".
 
 ## 7. Lixeira e Desfazer
 

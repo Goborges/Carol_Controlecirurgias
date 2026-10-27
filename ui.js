@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.10';
+  const VERSION = '1.11';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -627,7 +627,7 @@
 
   // ================= navegação =================
   const APP_NAME = 'Controle de Cirurgias';
-  const TITLES = { lista: 'Cirurgias', relatorios: 'Relatórios', ajustes: 'Ajustes' };
+  const TITLES = { lista: 'Cirurgias', recebimentos: 'Recebimentos', relatorios: 'Relatórios', ajustes: 'Ajustes' };
   function go(tab, filtro) {
     S.tab = tab;
     if (filtro) S.f = { q: '', status: 'todas', periodo: 'tudo', col: '', hosp: '', conv: '', ...filtro };
@@ -639,14 +639,15 @@
     const t = $('#title');
     // na prévia, uma linha discreta avisa que as cirurgias são inventadas (para não confundir com as dela)
     if (S.tab === 'inicio') t.replaceChildren(APP_NAME, h('span', { class: 'sub' }, PREVIEW && S.demo ? `${greeting()}. Estas cirurgias são de exemplo.` : greeting() + (S.settings.nome ? ', ' + S.settings.nome : '')));
+    else if (S.tab === 'ajustes') t.replaceChildren(h('button', { class: 'navbtn voltar', type: 'button', onclick: () => go('inicio') }, icon('back'), 'Início'), TITLES.ajustes);
     else t.replaceChildren(...[TITLES[S.tab], S.tab === 'lista' && S.records.length ? h('span', { class: 'sub' }, plural(S.records.length, 'cirurgia registrada', 'cirurgias registradas')) : null].filter(Boolean));
-    // bolinha em Ajustes quando o backup está atrasado
-    const ta = $('.tab[data-tab=ajustes]');
-    if (ta) { const bd = ta.querySelector('.badge'); if (backupDue() && !bd) ta.append(h('span', { class: 'badge', 'aria-label': 'Backup pendente' })); else if (!backupDue() && bd) bd.remove(); }
     const acts = $('#top-actions'); acts.replaceChildren();
+    // Ajustes fica num ícone no topo do Início, com a bolinha quando o backup está atrasado
+    if (S.tab === 'inicio') acts.append(h('button', { class: 'navbtn gear', id: 'btn-ajustes', type: 'button', 'aria-label': backupDue() ? 'Ajustes. Backup pendente' : 'Ajustes', onclick: () => go('ajustes') },
+      icon('gear'), backupDue() ? h('span', { class: 'badge', 'aria-hidden': 'true' }) : null));
     if (S.tab === 'lista' && S.records.length) acts.append(h('button', { class: 'navbtn', type: 'button', onclick: () => { S.selecting = !S.selecting; S.sel.clear(); render(); } }, S.selecting ? 'Pronto' : 'Selecionar'));
     if (S.settings.pinHash) acts.append(h('button', { class: 'navbtn', type: 'button', 'aria-label': 'Bloquear agora', onclick: () => lockScreen() }, icon('lock')));
-    const view = { inicio: viewInicio, lista: viewLista, relatorios: viewRelatorios, ajustes: viewAjustes }[S.tab];
+    const view = { inicio: viewInicio, lista: viewLista, recebimentos: viewRecebimentos, relatorios: viewRelatorios, ajustes: viewAjustes }[S.tab];
     // a tabela ganha uma coluna mais larga no computador e no iPhone deitado
     document.documentElement.classList.toggle('wide', S.tab === 'relatorios' && S.relTab === 'tabela');
     const faixa = TESTE ? tip('Modo de teste', ' Estes dados ficam num banco separado do app de verdade.', 'Sair do modo de teste', () => { location.href = location.pathname; }, 'alert', 'warn') : null;
@@ -695,14 +696,17 @@
       sub = [h('span', null, partes), m.semValor ? h('span', null, `${m.semValor} ainda sem valor`) : null];
       label = `Para receber: ${m.estimados ? 'cerca de ' : ''}${brl(m.aReceber)}${m.confirmados && m.estimados ? `, sendo ${brl(m.confirmados)} confirmados e cerca de ${brl(m.estimados)} estimados` : ''}, de ${plural(m.open, 'cirurgia', 'cirurgias')}${m.semValor ? `, ${m.semValor} ainda sem valor` : ''}. Ver as cirurgias a receber.`;
     }
-    out.push(h('button', { class: 'hero', type: 'button', onclick: () => go('lista', { status: 'aberto' }), 'aria-label': label },
+    out.push(h('button', { class: 'hero', type: 'button', onclick: () => go('recebimentos'), 'aria-label': label.replace('Ver as cirurgias a receber.', 'Ver os recebimentos.') },
       h('span', { class: 'label' }, 'Para receber'), big, h('span', { class: 'sub' }, sub), h('span', { class: 'stitch', 'aria-hidden': 'true' }), strip));
-    // só o que falta cadastrar; atrasos e adicional noturno ficam em Relatórios
+    // "Precisa de atenção": no máximo 3 linhas, cada uma levando à tela certa (os detalhes ficam em Recebimentos)
     const todo = (ic, tone, title, sub, fn) => { const b = rowBtn(ic, tone, title, sub, fn); b.classList.add(tone); return b; };
     const rows = [];
     if (m.review) rows.push(todo('alert', 'warn', plural(m.review, 'cirurgia para completar', 'cirurgias para completar'), 'falta procedimento, hospital ou colega', () => go('lista', { status: 'revisar' })));
     if (m.loose) rows.push(todo('photo', 'accent', plural(m.loose, 'foto sem legenda', 'fotos sem legenda'), 'diga de qual cirurgia é cada uma', () => sheetLoose()));
-    if (rows.length) out.push(h('section', { class: 'sec' }, secTitle('Para completar'), h('div', { class: 'todo' }, rows)));
+    if (m.late) { const v = S.records.filter(isLate).reduce((a, r) => a + (valueOf(r).v || 0), 0);
+      rows.push(todo('clock', 'danger', plural(m.late, 'cirurgia atrasada', 'cirurgias atrasadas'), `passaram do prazo de costume${v ? `, cerca de ${brl0(v)}` : ''}`, () => { go('recebimentos'); const el = $('#sec-atrasadas'); if (el) el.scrollIntoView({ block: 'start' }); })); }
+    if (m.checks) rows.push(todo('moon', 'night', plural(m.checks, 'pagamento sem o adicional noturno', 'pagamentos sem o adicional noturno'), 'confira com o faturamento', () => { S.relTab = 'totais'; go('relatorios'); const el = $('#sec-conferir') || $('#sec-convenios'); if (el) el.scrollIntoView({ block: 'start' }); }));
+    if (rows.length) out.push(h('section', { class: 'sec', id: 'sec-atencao' }, secTitle('Precisa de atenção'), h('div', { class: 'todo' }, rows.slice(0, 3))));
     const recent = [...S.records].sort(byDateDesc).slice(0, 5);
     if (recent.length) out.push(h('section', { class: 'sec' }, secTitle('Últimas cirurgias', h('button', { type: 'button', onclick: () => go('lista', {}) }, 'Ver todas')),
       h('div', { class: 'group' }, recent.map((r) => recordItem(r, (x) => sheetRecord(x))))));
@@ -922,8 +926,6 @@
     const pays = recebidoPorMes();
     const out = [chart];
     if (watch.length) out.push(h('section', { class: 'sec' }, secTitle('Para acompanhar'), h('div', { class: 'group' }, watch)));
-    const prev = previsao();
-    if (prev) out.push(prev);
     out.push(h('section', { class: 'sec' }, secTitle('Mês a mês'), h('p', { class: 'note' }, 'Pelo mês em que a cirurgia foi feita.'), h('div', { class: 'group flat' }, rows)));
     if (pays.size) out.push(h('section', { class: 'sec' }, secTitle('Dinheiro que entrou'), h('p', { class: 'note' }, 'Pelo mês em que o pagamento caiu.'),
       h('div', { class: 'group flat' }, [...pays.keys()].sort().reverse().map((k) => rowBtn(null, null, monthName(k), null, null, h('span', { class: 'v' }, brl(pays.get(k))))))));
@@ -988,6 +990,45 @@
       h('button', { class: 'rowbtn danger', type: 'button', onclick: () => wipeAll() }, h('span', { class: 'bubble danger' }, icon('trash')), h('span', { class: 't' }, TESTE ? 'Apagar os dados de teste' : 'Apagar todos os dados'))));
     if (navigator.storage && navigator.storage.estimate && S.storage !== 'memory') navigator.storage.estimate().then((e) => { const el = $('#storage-info'); if (el && e.usage) el.textContent = `Os dados ficam só neste aparelho (${(e.usage / 1048576).toFixed(1).replace('.', ',')} MB)`; }).catch(() => {});
     return out;
+  }
+  // ================= Recebimentos (item 27) =================
+  // A receber e recebido no mês, quando deve cair, as atrasadas, as pagas em parte e o histórico de planilhas e
+  // pagamentos. Ações de registrar ficam no botão +.
+  function viewRecebimentos() {
+    if (!S.records.length) return [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('cash')), h('p', null, 'Nenhuma cirurgia ainda. Traga a conversa do WhatsApp pelo botão +.'))];
+    const m = metrics(); const out = [];
+    const aReceber = !m.open ? 'Nada esperando pagamento' : m.semValor === m.open ? plural(m.open, 'cirurgia', 'cirurgias') + ', ainda sem valor'
+      : m.confirmados && m.estimados ? `${brl0(m.confirmados)} confirmados + ≈ ${brl0(m.estimados)} estimados` : plural(m.open, 'cirurgia', 'cirurgias') + (m.semValor ? `, ${m.semValor} ainda sem valor` : '');
+    const total = m.open && m.semValor !== m.open ? (m.estimados ? '≈ ' : '') + brl0(m.aReceber) : '—';
+    out.push(h('div', { class: 'group' },
+      rowBtn('cash', 'accent', 'A receber', aReceber, m.open ? () => go('lista', { status: 'aberto' }) : null, h('span', { class: 'v' }, total)),
+      rowBtn('check', 'ok', 'Recebido em ' + MES_LONGO[+today().slice(5, 7) - 1], 'o que caiu na conta neste mês', null, h('span', { class: 'v' }, brl0(m.recMes)))));
+    const prev = previsao(); if (prev) out.push(prev);
+    const lista = (id, titulo, nota, rs, filtro) => h('section', { class: 'sec', id }, secTitle(titulo, rs.length > 5 && filtro ? h('button', { type: 'button', onclick: () => go('lista', { status: filtro }) }, 'Ver todas') : null),
+      nota ? h('p', { class: 'note' }, nota) : null, h('div', { class: 'group' }, rs.slice(0, 5).map((r) => recordItem(r, (x) => sheetRecord(x)))));
+    const atrasadas = S.records.filter(isLate).sort((a, b) => a.date.localeCompare(b.date));
+    if (atrasadas.length) out.push(lista('sec-atrasadas', 'Atrasadas', 'Passaram do prazo de costume de quem paga. Sem histórico de quem paga, depois de ' + S.settings.alertDias + ' dias.', atrasadas, 'atrasadas'));
+    const parciais = S.records.filter((r) => sit(r) === 'parcial').sort((a, b) => a.date.localeCompare(b.date));
+    if (parciais.length) out.push(lista('sec-parciais', 'Pagas em parte', 'Já entrou uma parte; o resto continua a receber.', parciais, null));
+    out.push(historico());
+    return out;
+  }
+  // Histórico: cada planilha de repasse numa linha e cada pagamento registrado por ela, do mais novo para o mais antigo
+  function historico() {
+    const itens = [];
+    for (const d of S.repasses) itens.push({ data: d.pay || '', el: () => rowBtn('sheet', '', d.numero ? 'Planilha nº ' + d.numero : d.nome || 'Planilha de repasse',
+      `${ddmmyyyy(d.pay)}: ${brl(d.total)} liberados${d.caiu != null ? `, caiu ${brl(d.caiu)}` : ''}`, () => sheetRepasses(), h('span', { class: 'v' }, brl0(d.caiu != null ? d.caiu : d.total))) });
+    for (const r of S.records) for (const p of r.pagamentos || []) {
+      if (p.origem === 'repasse') continue;
+      itens.push({ data: p.data || '', el: () => rowBtn('cash', 'ok', procText(r), `${p.data ? ddmmyyyy(p.data) : 'sem data'}: registrado por você${p.fonte ? ', de ' + p.fonte : ''}${p.parcial ? ', uma parte' : ''}`,
+        () => sheetRecord(r), h('span', { class: 'v' }, p.valor == null ? 'sem valor' : brl0(p.valor))) });
+    }
+    itens.sort((a, b) => b.data.localeCompare(a.data));
+    const n = S.histN || 10;
+    return h('section', { class: 'sec', id: 'sec-historico' }, secTitle('Histórico', S.repasses.length ? h('button', { type: 'button', onclick: () => sheetRepasses() }, 'Planilhas') : null),
+      h('p', { class: 'note' }, 'Planilhas de repasse e pagamentos que você registrou.'),
+      itens.length ? h('div', { class: 'group' }, itens.slice(0, n).map((x) => x.el())) : h('p', { class: 'note' }, 'Nenhum pagamento ainda.'),
+      itens.length > n ? h('button', { class: 'btn ghost block', type: 'button', onclick: () => { S.histN = n + 20; render(); } }, 'Ver mais') : null);
   }
   // ---- prazo e previsão (item 28) ----
   function quandoCai(r, pz) {
@@ -2576,7 +2617,7 @@
     const tab = (t, ic, l) => h('button', { class: 'tab', type: 'button', 'data-tab': t, onclick: () => go(t) }, icon(ic), l);
     $('#tabbar').replaceChildren(h('div', { class: 'tabbar-in' }, tab('inicio', 'home', 'Início'), tab('lista', 'list', 'Cirurgias'),
       h('button', { class: 'fab', id: 'fab', type: 'button', 'aria-label': 'Adicionar', onclick: sheetAdd }, icon('plus')),
-      tab('relatorios', 'chart', 'Relatórios'), tab('ajustes', 'gear', 'Ajustes')));
+      tab('recebimentos', 'cash', 'Recebimentos'), tab('relatorios', 'chart', 'Relatórios')));
     render();
     // filete embaixo do título quando a página rola
     let rolou = false;
