@@ -299,6 +299,14 @@
     return { chatName, messages: msgs };
   }
 
+  /** Lê de volta a chave de uma mensagem: data, hora, começo do texto (sem acento) e quantos arquivos ela tinha.
+   *  Serve para mostrar uma mensagem que o app ignora sem guardar a conversa. Chave de foto solta pode ter "~n". */
+  function describeKey(key) {
+    const m = String(key || '').match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}):(\d{2})\|([a-z0-9 ]*)\|(\d+)#(\d+)(?:~(\d+))?$/);
+    if (!m) return null;
+    return { date: m[1], time: m[2], texto: m[4], arquivos: +m[5], foto: m[7] != null ? +m[7] : null };
+  }
+
   /** Agrupa mensagens em cirurgias (legenda + fotos) e fotos sem legenda. */
   function groupMessages(messages) {
     const entries = []; const loose = []; let pending = []; let last = null;
@@ -717,7 +725,7 @@
   const api = {
     norm, stripMarks, pad2, ymd, dayNum, fromDayNum, minutesOf, weekday, todayStr, median, round2, uid, capFirst, sentenceCase, levenshtein,
     easter, isHoliday, isUrgent, parseExtraHolidays, T, TYPE_LABEL, defaultTerms, buildIndex, famOf,
-    parseCaption, parseChat, groupMessages, collectUnknown, recordFromEntry,
+    parseCaption, parseChat, describeKey, groupMessages, collectUnknown, recordFromEntry,
     zipOpen, zipEntryBlob, zipEntryChecked, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
   };

@@ -6,8 +6,8 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 
 | | |
 |---|---|
-| Versão do app entregue | 1.6 (27/10/2026, pacote `entrega-1.6.zip`) |
-| Versão publicada no GitHub | 1.6 (27/10/2026) |
+| Versão do app entregue | 1.7 (27/10/2026, pull request no GitHub) |
+| Versão publicada no GitHub | 1.7 (27/10/2026) |
 | Forma de entrega | Em lotes de 3 a 5 itens (pedido de 27/10/2026). Desde a 1.6, o Claude publica direto no GitHub: cada lote é um pull request, já aprovado (o Gustavo deu permissão total). Para desfazer um lote, use o botão Revert do pull request. |
 | Uso real | A Carol ainda não instalou nem usa o app (confirmado em 26/10/2026): não há dados reais a proteger até ela começar. |
 | Última atualização deste arquivo | 27/10/2026 |
@@ -30,11 +30,11 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 | 7 | Backup que aguenta o crescimento (em partes) | feito (27/10/2026, v1.6) | Partes de até 40 MB, montadas uma de cada vez e salvas uma por vez. A parte 1 leva os dados. Com uma parte só, o arquivo tem o mesmo formato de antes. Testado: nenhum passo lê todas as fotos juntas. |
 | 8 | Backup na hora certa (logo depois de cada importação) | feito (27/10/2026, v1.6) | Convite "Faça um backup agora" no fim da importação da conversa (avisando que o .zip do WhatsApp pode ser apagado depois) e da planilha. O lembrete de 30 dias continua. |
 | 9 | Restauração segura (validar antes, trocar no final) | feito (27/10/2026, v1.6) | Antes de pedir confirmação, o app confere as partes, cada foto (código CRC) e o espaço livre. Depois grava só as fotos que faltam e troca os dados numa transação única: se algo falhar, nada muda. Aceita várias partes de uma vez e os backups das versões antigas. Testado com parte faltando, parte danificada e backup da 1.5. |
-| 10 | Lixeira de 30 dias, "Desfazer" e recuperar ignoradas | pendente | Confirmado: excluir é definitivo e manda a mensagem para a lista de ignoradas. |
-| 11 | Desfazer importação do WhatsApp | pendente | |
-| 12 | Importação que não se perde (lotes, retomar, limpar órfãs) | pendente | Confirmado: `runImport` grava as fotos primeiro e as fichas só no fim. |
-| 13 | Miniaturas separadas das originais (com migração) | pendente | Confirmado: miniatura e original ficam no mesmo registro do store `photos`. |
-| 14 | Blindar a privacidade: sem fonte do Google, Content-Security-Policy, explicar a origem compartilhada | pendente | A 1.3 carrega a fonte Nunito do Google Fonts. |
+| 10 | Lixeira de 30 dias, "Desfazer" e recuperar ignoradas | feito (27/10/2026, v1.7) | Excluir uma cirurgia, apagar uma foto sem legenda ou tirar uma foto de uma ficha manda para a lixeira (lista `trash`), com as fotos, e o aviso ganha "Desfazer". Em Ajustes > Lixeira: recuperar, e a lista "Mensagens que o app ignora", com "Trazer de volta" (a mensagem volta na próxima importação). Depois de 30 dias o item sai de vez. Cada mensagem ignorada guarda o motivo (excluída, apagada, organizada, juntada). |
+| 11 | Desfazer importação do WhatsApp | feito (27/10/2026, v1.7) | Cada importação tem um número (lista `imports`); fichas e fotos sem legenda levam esse número, e as fotos postas em fichas que já existiam ficam anotadas nela. Desfazer pelo "Pronto!" da importação ou em Ajustes > Conversas do WhatsApp. Avisa quando há cirurgias com mudanças dela (pagamento, edição). Sem lixeira: trazer a conversa de novo traz tudo de volta. Só vale para importações da 1.7 em diante. |
+| 12 | Importação que não se perde (lotes, retomar, limpar órfãs) | feito (27/10/2026, v1.7) | Cada cirurgia entra com as suas fotos e o seu número assim que fica pronta. Se o app fechar no meio, o Início avisa que a importação não terminou; escolher o arquivo de novo traz só o que faltou, na mesma importação. Fotos guardadas sem ficha saem ao abrir o app (menos quando há outra janela do app aberta). A numeração das fichas nunca volta. A tela de importação não fecha enquanto guarda as fotos. |
+| 13 | Miniaturas separadas das originais (com migração) | feito (27/10/2026, v1.7) | Lista nova `thumbs` (banco na versão 2) e migração 2: copia cada miniatura, uma foto por vez; a antiga fica no registro da foto como cópia. Falta, numa versão futura, a migração 3, que apaga essa cópia depois de a 1.7 rodar sem problema. Mostrar miniaturas não lê mais a foto inteira (testado). Backup e restauração já usam a lista nova e continuam no mesmo formato. Testado: passagem da 1.6 para a 1.7 no mesmo endereço, volta para a 1.6 e ida de novo, com uma janela antiga aberta. |
+| 14 | Blindar a privacidade: sem fonte do Google, Content-Security-Policy, explicar a origem compartilhada | em andamento (v1.7) | Feito: a fonte do Google saiu (no iPhone, os títulos já usavam a SF Pro Rounded) e entrou a regra de segurança (CSP) no `index.html` e na página dos testes, que bloqueia conexões com outros sites (testado: nenhum pedido para fora). Falta: a decisão do Gustavo sobre o endereço compartilhado. Opções explicadas em 27/10/2026: manter, sem publicar outros sites na conta Goborges; mover para uma organização gratuita do GitHub só do app, de preferência antes de a Carol instalar; ou domínio próprio, com custo anual. |
 
 ## P2 — Números corretos
 
@@ -91,3 +91,4 @@ Nuvem, servidor, contas ou sincronização; integração bancária; IA ou OCR na
 | 27/10/2026 | Versão 1.4: itens 2 e 6. App em arquivos separados, cópia da 1.3 guardada em `versoes/`. Nada muda para quem usa. |
 | 27/10/2026 | Versão 1.5: item 3. Testes do núcleo e página de testes. O `sw.js` foi corrigido: abrir outra página do endereço, como a dos testes, podia tomar o lugar do app na cópia usada sem internet. Nada muda para quem usa. |
 | 27/10/2026 | Versão 1.6, em lote: itens 4, 5, 7, 8 e 9. Modo de teste e roteiro de teste, versão dos dados e aviso de versão nova, diagnóstico, backup em partes, backup depois das importações e restauração segura. Leva também a pasta `testes/` da 1.5, que não subiu com ela. Primeira publicada pelo Claude direto no GitHub. |
+| 27/10/2026 | Versão 1.7, em lote: itens 10 a 14. Lixeira de 30 dias com Desfazer e mensagens ignoradas, desfazer importação do WhatsApp, importação que continua de onde parou, miniaturas numa lista separada (banco na versão 2, com migração) e regra de segurança sem fonte de fora. Pull request #2. |

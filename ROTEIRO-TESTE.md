@@ -1,6 +1,6 @@
 # Roteiro de teste no iPhone
 
-Use depois de subir cada lote no GitHub. Leva uns 15 minutos e nunca mexe nos dados da Carol: tudo acontece no **modo de teste**, um banco separado, com dados inventados.
+Use depois de cada lote publicado no GitHub. Leva uns 20 minutos e nunca mexe nos dados da Carol: tudo acontece no **modo de teste**, um banco separado, com dados inventados.
 
 Endereço do app: `goborges.github.io/Carol_Controlecirurgias`
 
@@ -34,6 +34,10 @@ Toque em **Começar → Escolher o arquivo** e escolha `conversa-iphone.zip` em 
 - "12 cirurgias encontradas". Toque em **Trazer para o app**.
 - "Pronto! 12 cirurgias novas no app", com 2 fotos para organizar e o convite "Faça um backup agora".
 
+Agora teste o desfazer: no "Pronto!", toque em **Desfazer esta importação** e confirme.
+
+**Deve aparecer:** a tela de boas-vindas, vazia de novo. Repita este passo 3 para trazer a conversa outra vez. Desta vez o app não pergunta "Quem é quem?", porque já guardou a resposta.
+
 ## 4. Trazer a planilha de exemplo
 
 Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Escolha a data em que o dinheiro caiu e toque em **Confirmar**.
@@ -46,39 +50,45 @@ Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Esc
 - **Cirurgias:** 14 cirurgias.
 - **Relatórios → Tabela:** 14 linhas, da mais nova para a mais antiga.
 
-## 6. Fechar e abrir de novo
+## 6. Lixeira e Desfazer
+
+1. Em **Cirurgias**, abra uma cirurgia e toque em **Excluir cirurgia**. Confirme. **Deve aparecer** o aviso "Cirurgia excluída" com **Desfazer**. Toque em **Desfazer**: ela volta.
+2. Exclua a mesma cirurgia de novo, sem desfazer. Em **Ajustes**, a linha **Lixeira** mostra "1 item". Abra e toque em **Recuperar**: ela volta para a lista.
+3. Em **Ajustes → Conversas do WhatsApp**, **deve aparecer** a conversa trazida, com o botão **Desfazer**. Não toque nele agora.
+
+## 7. Fechar e abrir de novo
 
 Feche a aba do Safari e abra outra vez o endereço com `?teste`.
 
 **Deve aparecer:** as mesmas 14 cirurgias.
 
-## 7. Fazer backup
+## 8. Fazer backup
 
 Em **Ajustes → Fazer backup**, toque em **Salvar em Arquivos** e salve no iCloud Drive.
 
 **Deve aparecer:** "Backup salvo". Com poucas fotos sai um arquivo só. Com muitas, o app pede para salvar parte por parte, e todas as partes ficam na mesma pasta.
 
-## 8. Apagar e restaurar
+## 9. Apagar e restaurar
 
 1. Em **Ajustes → Apagar os dados de teste**, confirme duas vezes. **Deve aparecer** a tela de boas-vindas, vazia.
 2. Em **Ajustes → Restaurar um backup**, escolha o arquivo do backup (todas as partes juntas, se houver). **Deve aparecer** "Restaurar o backup?" com 14 cirurgias.
 3. Toque em **Restaurar**. **Deve aparecer** "Backup restaurado." e as 14 cirurgias de volta, com as fotos.
 
-## 9. Diagnóstico
+## 10. Diagnóstico
 
 Em **Ajustes → Copiar diagnóstico**, toque em **Copiar** e cole numa conversa.
 
 **Deve aparecer:** a versão do app, "modo de teste" e contagens, sem nenhum nome, procedimento ou valor.
 
-## 10. Sair do modo de teste
+## 11. Sair do modo de teste
 
 Toque em **Sair do modo de teste**, na faixa amarela.
 
 **Deve aparecer:** o app de verdade, sem nenhuma das 14 cirurgias de teste.
 
-## 11. O app instalado
+## 12. O app instalado
 
-1. Abra pelo ícone. Em Ajustes, no fim, aparece a versão nova.
+1. Abra pelo ícone. Em Ajustes, no fim, aparece a versão nova. Na primeira abertura depois de uma versão que mexe no banco, o app pode mostrar "Atualizando o app" por alguns segundos.
 2. Ligue o modo avião e abra pelo ícone. O app abre normalmente. Depois desligue o modo avião.
 3. Se uma versão nova for publicada com o app aberto, aparece "Nova versão disponível". Toque em **Atualizar**.
 

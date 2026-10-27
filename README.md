@@ -25,6 +25,12 @@ Endereço: https://goborges.github.io/Carol_Controlecirurgias/
 - Sem etapa de build: os arquivos publicados são o próprio código.
 - A cada versão, suba `VERSION` em `ui.js` e `CACHE` em `sw.js`, com o mesmo número.
 - Nenhum dado real neste repositório, que é público: nada de conversa exportada, fotos ou planilhas.
+- Nada vem de outro site: sem fonte, biblioteca ou serviço de fora. A regra de segurança (Content-Security-Policy) no `index.html` bloqueia qualquer conexão externa.
+- Mudança no formato salvo entra como migração numerada em `MIGRATIONS` (`ui.js`). Uma lista nova no banco sobe `DB_VERSION`; o app abre um banco mais novo que ele, para que voltar de versão nunca esconda os dados.
+
+## Onde os dados ficam
+
+No próprio aparelho, no banco do navegador (IndexedDB), nas listas: `records` (cirurgias), `photos` (fotos originais), `thumbs` (miniaturas), `loose` (fotos sem legenda), `terms` (nomes e abreviações), `repasses` (planilhas), `imports` (conversas importadas), `trash` (lixeira de 30 dias), `ignored` (mensagens da conversa que o app não traz de novo) e `meta` (ajustes).
 
 ## Testes
 
