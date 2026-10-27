@@ -1,24 +1,44 @@
-/* Registro de Cirurgias — guarda o app no aparelho para abrir sem internet. Não guarda dados. */
-const CACHE = 'cirurgias-1.0';
-const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
+/* Controle de Cirurgias — guarda o app no aparelho para abrir sem internet. Não guarda dados.
+   A cada entrega, troque o número em CACHE (igual à versão do app em ui.js): é isso que faz a atualização chegar ao iPhone.
+   Arquivos do app (página, estilo e código): com internet, sempre a versão mais nova, e uma cópia fica guardada;
+   sem internet, abre a cópia. Assim a página e o código nunca ficam de versões diferentes. Ícones e fonte: a cópia guardada. */
+const CACHE = 'cirurgias-1.4';
+const APP_FILES = ['./', './index.html', './style.css', './core.js', './ui.js', './manifest.webmanifest'];
+const OTHER_FILES = ['./icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll([...APP_FILES, ...OTHER_FILES].map((u) => new Request(u, { cache: 'no-cache' }))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
+
+// guarda só respostas boas: do próprio app, ou da fonte (que vem "fechada" de outro site)
+function keep(key, res) {
+  if (res && ((res.ok && res.type === 'basic') || res.type === 'opaque' || (res.ok && res.type === 'cors'))) { const cp = res.clone(); caches.open(CACHE).then((c) => c.put(key, cp)); }
+  return res;
+}
+// com internet: pergunta ao GitHub se mudou (no-cache) e guarda a cópia; sem internet: usa a cópia
+function fresh(url, key) {
+  return fetch(url, { cache: 'no-cache', credentials: 'same-origin' })
+    .then((res) => keep(key, res))
+    .catch(() => caches.match(key, { ignoreSearch: true }).then((m) => m || Response.error()));
+}
+function stored(req) {
+  return caches.match(req).then((m) => m || fetch(req).then((res) => keep(req, res)));
+}
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin === location.origin) {
-    if (req.mode === 'navigate') {
-      e.respondWith(fetch(req).then((r) => { const cp = r.clone(); caches.open(CACHE).then((c) => c.put('./index.html', cp)); return r; }).catch(() => caches.match('./index.html')));
-      return;
-    }
-    e.respondWith(caches.match(req).then((m) => m || fetch(req).then((r) => { const cp = r.clone(); caches.open(CACHE).then((c) => c.put(req, cp)); return r; })));
+    if (req.mode === 'navigate') { e.respondWith(fresh(req.url, './index.html')); return; }
+    if (/\.(js|css|webmanifest)$/.test(url.pathname)) { e.respondWith(fresh(req.url, url.pathname.replace(/^.*\//, './'))); return; }
+    e.respondWith(stored(req));
   } else if (/fonts\.(googleapis|gstatic)\.com$/.test(url.hostname)) {
-    e.respondWith(caches.match(req).then((m) => m || fetch(req).then((r) => { const cp = r.clone(); caches.open(CACHE).then((c) => c.put(req, cp)); return r; })));
+    e.respondWith(stored(req));
   }
 });
