@@ -234,6 +234,11 @@ button.rowbtn:active, button.ritem:active, .trow:active { opacity: .55; }
 .sheet-head h2 { font-size: 17px; font-weight: 600; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 56vw; }
 .sheet-head .l { justify-self: start; } .sheet-head .r { justify-self: end; }
 .navbtn { border: 0; background: none; color: var(--accent); font-size: 17px; display: inline-flex; align-items: center; gap: 2px; padding: 8px; min-height: 44px; }
+/* Ajustes: ícone no topo do Início, com a bolinha do backup; em Ajustes, "Início" para voltar */
+.navbtn.gear { position: relative; color: var(--ink); }
+.navbtn.gear .ic { width: 26px; height: 26px; }
+.navbtn.gear .badge { position: absolute; top: 9px; right: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); border: 2px solid var(--bg); }
+.topbar h1 .voltar { display: flex; margin: 0 0 2px -8px; min-height: 36px; padding-block: 4px; font-family: var(--font-ui); font-size: 17px; font-weight: 400; letter-spacing: 0; }
 .navbtn .ic { width: 22px; height: 22px; stroke-width: 2.1; }
 .navbtn.strong { font-weight: 600; }
 .sheet-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-block: 6px 32px; padding-left: var(--gut); padding-right: var(--gut-r); }
