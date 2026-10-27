@@ -275,14 +275,14 @@
       const do17 = acts.filter((x) => x.date === '2026-09-17');
       igual(do17.length, 2, 'atos de 17/09');
       igual(do17.map((a) => (c.recs.find((r) => r.id === a.recordId) || {}).msgTime).sort(), ['08:30', '15:10'], 'cirurgias de 17/09');
-    }, 'item 25');
+    });
     teste('Cruzamento', 'complemento de cirurgia já paga cai na mesma cirurgia', async () => {
       const c = await conversa(); const rep = await repasse();
-      const recs = c.recs.map((r) => (r.date === '2026-09-02' ? { ...r, status: 'recebido', recebido: { valor: 444.02, data: '2026-10-05' }, rep: [rep.lines[0]] } : r));
+      const recs = c.recs.map((r) => (r.date === '2026-09-02' ? { ...r, devido: 444.02, devidoOrigem: 'repasse', pagamentos: [{ id: 'p', valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'rep900001' }], rep: [rep.lines[0]] } : r));
       const comp = { id: 'repX', lines: [{ ...rep.lines[0], valor: 50 }] };
       const a = C.planRepasse(comp, recs, c.index, { hosp: 'UMC' })[0];
-      igual(a.recordId, recs.find((r) => r.date === '2026-09-02').id, 'complemento');
-    }, 'item 23');
+      igual([a.recordId, a.certeza], [recs.find((r) => r.date === '2026-09-02').id, 'complemento'], 'complemento');
+    });
     teste('Cruzamento', 'duas cirurgias iguais no mesmo dia, sem hora na legenda: a hora do envio ajuda a casar na ordem certa', () => {
       const idx = indice();
       const ficha = (id, msgTime) => ({ id, status: 'aberto', date: '2026-09-10', time: null, msgDate: '2026-09-10', msgTime, procs: [CVL], hosp: 'UMC', cols: ['Bruno'] });
@@ -304,6 +304,142 @@
     teste('Cruzamento', 'nome completo já confirmado liga direto', () => {
       const idx = C.buildIndex(C.defaultTerms().concat([{ id: 'tb', type: 'col', name: 'Bruno', aliases: ['bruno', 'bruno teixeira lima'] }]));
       igual(C.mapExecutor('BRUNO TEIXEIRA LIMA', idx).how, 'exato', 'confirmado');
+    });
+
+    teste('Cruzamento', 'mesmo procedimento duas vezes sem hora, mas uma cirurgia só no app: continua um ato (pode ser bilateral)', async () => {
+      const c = await conversa(); const rep = await repasse();
+      const recs = c.recs.filter((r) => !(r.date === '2026-09-17' && r.msgTime === '15:10'));
+      igual(C.planRepasse(rep, recs, c.index, { hosp: 'UMC' }).filter((x) => x.date === '2026-09-17').map((a) => a.lines.length), [2], 'atos de 17/09');
+    });
+    teste('Cruzamento', 'ligar à mão, marcar como nova e separar à mão', async () => {
+      const c = await conversa(); const rep = await repasse();
+      const r04 = c.recs.find((r) => r.date === '2026-09-04');
+      const k22 = C.planRepasse(rep, c.recs, c.index, { hosp: 'UMC' }).find((x) => x.date === '2026-09-22').key;
+      const k02 = C.planRepasse(rep, c.recs, c.index, { hosp: 'UMC' }).find((x) => x.date === '2026-09-02').key;
+      const acts = C.planRepasse(rep, c.recs, c.index, { hosp: 'UMC', ligar: new Map([[k22, r04.id], [k02, null]]) });
+      const a22 = acts.find((x) => x.key === k22), a02 = acts.find((x) => x.key === k02);
+      igual([a22.recordId, a22.certeza, a02.recordId, a02.certeza], [r04.id, 'manual', null, 'novo'], 'à mão');
+      const dois = { id: 'r2', lines: [{ ...rep.lines[0], time: null }, { ...rep.lines[2], time: null, exec: rep.lines[0].exec }] };
+      const k = C.planRepasse(dois, c.recs, c.index, { hosp: 'UMC' })[0].key;
+      igual(C.planRepasse(dois, c.recs, c.index, { hosp: 'UMC', separar: new Set([k]) }).length, 2, 'separado');
+    });
+    teste('Cruzamento', 'duas cirurgias parecidas no mesmo dia: o ato avisa que há outra candidata', async () => {
+      const { acts } = await plano();
+      verdade(acts.filter((x) => x.date === '2026-09-17').every((a) => a.outras.length === 1), 'as duas de 17/09 têm outra candidata');
+      igual(acts.find((x) => x.date === '2026-09-02').outras, [], 'a de 02/09 não');
+    });
+    teste('Cruzamento', 'aponta diferença de data e de valor combinado', () => {
+      const idx = indice();
+      const r = { id: 'x', status: 'aberto', pagamentos: [], devido: 500, devidoOrigem: 'combinado', date: '2026-09-09', time: null, procs: [CVL], hosp: 'UMC', cols: ['Bruno'] };
+      const a = C.planRepasse({ id: 'r', lines: [{ date: '2026-09-10', time: '10:00', valor: 444.02, conv: 'X', cod: '1', proc: 'COLECISTECTOMIA SEM COLANGIOGRAFIA POR VIDEOLAPAROSCOPIA', funcao: 'Primeiro Auxiliar', exec: 'Bruno' }] }, [r], idx, { hosp: 'UMC' })[0];
+      igual([a.recordId, a.difData, a.difValor], ['x', '2026-09-09', 500], 'diferenças');
+    });
+
+    // ---------- modelo financeiro ----------
+    const antiga = (extra) => ({ id: 'r1', origem: 'whatsapp', date: '2026-09-02', time: '10:15', procs: [CVL], status: 'aberto', recebido: null, valorPrevisto: null, rep: [], ...(extra || {}) });
+    const semId = (pg) => pg.map(({ id, ...p }) => p);
+    teste('Modelo financeiro', 'ficha antiga a receber com valor combinado: valor devido combinado, sem pagamento', () => {
+      const r = antiga({ valorPrevisto: 1500 }); verdade(C.migrarFinanceiro(r), 'mudou');
+      igual([r.devido, r.devidoOrigem, r.pagamentos, C.situacao(r)], [1500, 'combinado', [], 'aberto'], 'ficha');
+    });
+    teste('Modelo financeiro', 'ficha antiga paga pela planilha: um pagamento e o devido da planilha', () => {
+      const r = antiga({ status: 'recebido', recebido: { valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'rep900001' }, valorPrevisto: 400 });
+      C.migrarFinanceiro(r);
+      igual([semId(r.pagamentos), r.devido, r.devidoOrigem, r.devidoAntes, C.situacao(r)],
+        [[{ valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'rep900001', fonte: null }], 444.02, 'repasse', { valor: 400, origem: 'combinado' }, 'recebido'], 'ficha');
+    });
+    teste('Modelo financeiro', 'ficha antiga paga à mão continua recebida, mesmo abaixo do combinado', () => {
+      const r = antiga({ status: 'recebido', recebido: { valor: 450, data: '2026-10-01', origem: 'manual' }, valorPrevisto: 500 });
+      C.migrarFinanceiro(r);
+      igual([r.devido, r.pagamentos.length, C.situacao(r), r.valorPrevisto], [null, 1, 'recebido', 500], 'ficha');
+    });
+    teste('Modelo financeiro', 'sem cobrança continua sem cobrança, e migrar de novo não muda nada', () => {
+      const r = antiga({ status: 'semcobranca' }); C.migrarFinanceiro(r);
+      igual([C.situacao(r), C.migrarFinanceiro(r)], ['semcobranca', false], 'ficha');
+    });
+    teste('Modelo financeiro', 'pagamento abaixo do devido fica parcial, com saldo; o resto quita', () => {
+      const r = antiga(); C.migrarFinanceiro(r); r.devido = 500; r.devidoOrigem = 'combinado';
+      r.pagamentos.push({ id: 'a', valor: 300, data: '2026-10-01', origem: 'manual' });
+      igual([C.situacao(r), C.totalRecebido(r)], ['parcial', 300], 'parte');
+      r.pagamentos.push({ id: 'b', valor: 200, data: '2026-10-20', origem: 'manual' });
+      igual(C.situacao(r), 'recebido', 'resto');
+    });
+    teste('Modelo financeiro', 'sem valor devido: parte marcada fica parcial; pagamento sem valor anotado quita', () => {
+      const r = antiga(); C.migrarFinanceiro(r);
+      r.pagamentos.push({ id: 'a', valor: 200, data: '2026-10-01', origem: 'manual', parcial: true });
+      igual(C.situacao(r), 'parcial', 'parte');
+      const q = antiga(); C.migrarFinanceiro(q); q.devido = 500; q.pagamentos.push({ id: 'b', valor: null, data: '2026-10-01', origem: 'manual' });
+      igual(C.situacao(q), 'recebido', 'sem valor anotado');
+    });
+    teste('Modelo financeiro', 'espelho para a versão 1.8: parcial aparece a receber; quitada com o total e a última data', () => {
+      const r = antiga(); C.migrarFinanceiro(r); r.devido = 500; r.devidoOrigem = 'combinado';
+      r.pagamentos.push({ id: 'a', valor: 300, data: '2026-10-01', origem: 'manual' }); C.compatFinanceiro(r);
+      igual([r.status, r.recebido, r.valorPrevisto], ['aberto', null, 500], 'parcial');
+      r.pagamentos.push({ id: 'b', valor: 200, data: '2026-10-20', origem: 'manual' }); C.compatFinanceiro(r);
+      igual([r.status, r.recebido.valor, r.recebido.data], ['recebido', 500, '2026-10-20'], 'quitada');
+    });
+    teste('Modelo financeiro', 'complemento soma no devido e no recebido; desfazer volta ao que era', () => {
+      const r = antiga({ devido: 500, devidoOrigem: 'combinado', pagamentos: [] });
+      const lin = (repId, valor) => [{ date: '2026-09-02', time: '10:15', valor, procName: CVL, repId }];
+      C.pagarPeloRepasse(r, { valor: 444.02 }, lin('A', 444.02), { id: 'p1', valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'A' });
+      C.pagarPeloRepasse(r, { valor: 50 }, lin('B', 50), { id: 'p2', valor: 50, data: '2026-11-05', origem: 'repasse', repId: 'B' });
+      igual([r.devido, C.totalRecebido(r), C.situacao(r), r.rep.length], [494.02, 494.02, 'recebido', 2], 'com complemento');
+      igual(C.desfazerRepasseNaFicha(r, 'B'), 'mudou', 'desfaz o complemento');
+      igual([r.devido, C.totalRecebido(r), r.rep.length], [444.02, 444.02, 1], 'sem o complemento');
+      C.desfazerRepasseNaFicha(r, 'A');
+      igual([r.devido, r.devidoOrigem, r.pagamentos.length, C.situacao(r), 'devidoAntes' in r], [500, 'combinado', 0, 'aberto', false], 'sem planilha');
+    });
+    teste('Modelo financeiro', 'cirurgia criada pela planilha: desfazer apaga, a não ser que outra planilha também tenha pago', () => {
+      const nova = () => ({ id: 'n', origem: 'repasse', repCriador: 'A', devido: 300, devidoOrigem: 'repasse', pagamentos: [{ id: 'p1', valor: 300, data: '2026-10-05', origem: 'repasse', repId: 'A' }], rep: [{ repId: 'A', valor: 300 }] });
+      igual(C.desfazerRepasseNaFicha(nova(), 'A'), 'apagar', 'só ela');
+      const r = nova(); C.pagarPeloRepasse(r, { valor: 40 }, [{ repId: 'B', valor: 40 }], { id: 'p2', valor: 40, data: '2026-11-05', origem: 'repasse', repId: 'B' });
+      igual([C.desfazerRepasseNaFicha(r, 'A'), r.repCriador, r.devido, C.situacao(r)], ['mudou', 'B', 40, 'recebido'], 'com complemento de outra');
+    });
+
+    teste('Modelo financeiro', 'linha da planilha numa cirurgia que ela marcou como recebida: o mesmo pagamento, sem somar', async () => {
+      const c = await conversa(); const rep = await repasse();
+      const paga = (valor) => c.recs.map((r) => (r.date === '2026-09-02' ? { ...r, devido: null, devidoOrigem: null, pagamentos: [{ id: 'm', valor, data: '2026-10-01', origem: 'manual' }] } : r));
+      const ato = (recs, opts) => C.planRepasse(rep, recs, c.index, { hosp: 'UMC', ...(opts || {}) }).find((x) => x.date === '2026-09-02');
+      const igualValor = ato(paga(444.02)), semValor = ato(paga(null)), outroValor = ato(paga(300));
+      igual([igualValor.certeza, igualValor.mesmo, semValor.mesmo, outroValor.mesmo, outroValor.podeSerMesmo], ['complemento', true, true, false, true], 'parte de "mesmo" com o mesmo valor ou sem valor anotado');
+      igual(ato(paga(300), { mesmo: new Map([[outroValor.key, true]]) }).mesmo, true, 'ela pode escolher');
+      const r = paga(null).find((x) => x.date === '2026-09-02');
+      C.pagarPeloRepasse(r, igualValor, [{ repId: 'A', valor: 444.02 }], { id: 'p', valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'A' }, { substituir: true });
+      igual([r.pagamentos.map((x) => x.origem), r.devido, C.totalRecebido(r), C.situacao(r)], [['repasse'], 444.02, 444.02, 'recebido'], 'a planilha passa a ser o registro');
+      C.desfazerRepasseNaFicha(r, 'A');
+      igual([r.pagamentos.map((x) => [x.origem, x.valor]), r.devido, 'substituidos' in r, C.situacao(r)], [[['manual', null]], null, false, 'recebido'], 'desfazer devolve o pagamento dela');
+    });
+    teste('Modelo financeiro', 'complemento de outra planilha soma na referência da cirurgia, em vez de virar uma linha solta', () => {
+      const idx = indice(); const linha = (repId, valor, time) => ({ date: '2026-09-02', time, valor, conv: 'Plano', proc: 'X', procName: CVL, fam: C.famOf(idx, CVL), funcao: 'Primeiro Auxiliar', exec: 'Bruno', repId });
+      const refs = C.buildRefs([{ id: 'a', rep: [linha('A', 400, '10:15'), linha('B', 44.02, null)] }, { id: 'b', rep: [linha('A', 444.02, '10:15')] }], []);
+      igual(refs.byProc.get(CVL), [444.02, 444.02], 'referência');
+    });
+    teste('Modelo financeiro', 'voltar de versão: o que ela fez na versão anterior não se perde', () => {
+      const nova = (extra) => { const r = antiga(); C.migrarFinanceiro(r); Object.assign(r, extra || {}); C.compatFinanceiro(r); return r; };
+      // a) marcou como recebida à mão
+      let r = nova(); r.status = 'recebido'; r.recebido = { valor: 300, data: '2026-10-10', origem: 'manual' };
+      verdade(C.reconciliarFinanceiro(r), 'mudou'); igual([semId(r.pagamentos).map((p) => p.valor), C.situacao(r)], [[300], 'recebido'], 'recebida à mão');
+      // b) pagou o resto de uma paga em parte, com valor combinado: continua recebida, e o pagamento de antes fica
+      r = nova({ devido: 350, devidoOrigem: 'combinado', pagamentos: [{ id: 'a', valor: 100, data: '2026-10-01', origem: 'manual' }] });
+      r.status = 'recebido'; r.recebido = { valor: 200, data: '2026-10-10', origem: 'manual' }; C.reconciliarFinanceiro(r);
+      igual([r.pagamentos.map((p) => p.valor), C.situacao(r)], [[100, 200], 'recebido'], 'resto pago lá');
+      // c) desfez a planilha: os pagamentos saem e o valor combinado volta
+      r = nova({ devido: 444.02, devidoOrigem: 'repasse', devidoAntes: { valor: 500, origem: 'combinado' }, pagamentos: [{ id: 'p', valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'A' }] });
+      r.status = 'aberto'; r.recebido = null; C.reconciliarFinanceiro(r);
+      igual([r.pagamentos, r.devido, r.devidoOrigem, C.situacao(r)], [[], 500, 'combinado', 'aberto'], 'planilha desfeita lá');
+      // d) corrigiu o valor recebido
+      r = nova({ pagamentos: [{ id: 'a', valor: 400, data: '2026-10-01', origem: 'manual' }] });
+      r.recebido = { ...r.recebido, valor: 420 }; C.reconciliarFinanceiro(r);
+      igual([r.pagamentos.map((p) => p.valor), C.situacao(r)], [[420], 'recebido'], 'valor corrigido lá');
+      // e) mudou o valor combinado de uma paga em parte: o pagamento fica
+      r = nova({ devido: 350, devidoOrigem: 'combinado', pagamentos: [{ id: 'a', valor: 100, data: '2026-10-01', origem: 'manual' }] });
+      r.valorPrevisto = 400; C.reconciliarFinanceiro(r);
+      igual([r.devido, r.pagamentos.length, C.situacao(r)], [400, 1, 'parcial'], 'valor combinado mudado lá');
+      // f) pagou pela planilha lá: o devido passa a ser o da planilha
+      r = nova({ devido: 350, devidoOrigem: 'combinado' }); r.status = 'recebido'; r.recebido = { valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'A' };
+      C.reconciliarFinanceiro(r); igual([r.devido, r.devidoOrigem, r.devidoAntes, C.situacao(r)], [444.02, 'repasse', { valor: 350, origem: 'combinado' }, 'recebido'], 'paga pela planilha lá');
+      // g) nada mudou lá
+      r = nova(); igual(C.reconciliarFinanceiro(r), false, 'sem mudança');
     });
 
     // ---------- estimativa ----------
