@@ -6,12 +6,13 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 
 | | |
 |---|---|
-| Versão do app entregue | 1.7 (27/10/2026, pull request no GitHub) |
-| Versão publicada no GitHub | 1.7 (27/10/2026) |
+| Versão do app entregue | 1.8 (27/10/2026, pull request no GitHub) |
+| Versão publicada no GitHub | 1.8 (27/10/2026) |
 | Forma de entrega | Em lotes de 3 a 5 itens (pedido de 27/10/2026). Desde a 1.6, o Claude publica direto no GitHub: cada lote é um pull request, já aprovado (o Gustavo deu permissão total). Para desfazer um lote, use o botão Revert do pull request. |
 | Uso real | A Carol ainda não instalou nem usa o app (confirmado em 26/10/2026): não há dados reais a proteger até ela começar. |
 | Última atualização deste arquivo | 27/10/2026 |
-| Próximo passo | Fase P2 (números corretos, itens 15 a 21), numa conversa nova: o documento pede uma fase por conversa. P0 e P1 estão completas. |
+| Próximo passo | Fase P3: itens 22, 23, 25 e 26. O Gustavo pediu para seguir nesta mesma conversa. |
+| Como decidir | Pedido do Gustavo em 27/10/2026: não travar o trabalho com perguntas pequenas. Regra de pagamento que ele não sabe e que não atrapalha o controle fica como está, anotada aqui, e o trabalho segue. Perguntar só o que for irreversível ou mudar a navegação. |
 
 ## P0 — Preservar, auditar e montar a rede de segurança
 
@@ -19,7 +20,7 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 |---|---|---|---|
 | 1 | Auditar o repositório (arquivos atuais e histórico) | feito (26/10/2026) | 3 commits, todos de 25/10: `README.md`, `registro-cirurgias.zip` (o pacote do próprio app, sem dados) e os 6 arquivos do app 1.0. Nenhuma conversa, foto, planilha ou nome real, nem no histórico. Nada a remover. |
 | 2 | Congelar a v1.3 e fazer backup dos dados da Carol antes de atualizar | feito (27/10/2026) | Cópia congelada em `versoes/app-cirurgias-1.3.zip`. Backup dispensado: a Carol ainda não usa o app. O formato salvo é o mesmo da 1.0 à 1.4 (banco `registro-cirurgias` versão 1, mesmos stores). |
-| 3 | Testes automáticos do núcleo (Node) com fixtures anonimizadas | feito (27/10/2026, v1.5) | 69 testes em `testes/nucleo.test.js` (67 na 1.5, mais 2 de foto danificada no backup na 1.6), com dados inventados em `testes/dados/`: conversa do iPhone com fotos, a mesma conversa com uma legenda editada, conversa do Android e planilha no formato da UMC. Rodam no navegador (`testes/`) e no Node. 11 falhas esperadas: itens 15 (2), 16, 18, 19, 20 (2), 21, 23 e 25 (2). Achado novo, registrado como comportamento atual para decidir depois: uma anotação de texto sem cirurgia vira ficha "Sem procedimento". A glosa (item 24) é tratada na tela, não no núcleo; o teste entra quando o item for feito. |
+| 3 | Testes automáticos do núcleo (Node) com fixtures anonimizadas | feito (27/10/2026, v1.5) | 69 testes em `testes/nucleo.test.js` (67 na 1.5, mais 2 de foto danificada no backup na 1.6), com dados inventados em `testes/dados/`: conversa do iPhone com fotos, a mesma conversa com uma legenda editada, conversa do Android e planilha no formato da UMC. Rodam no navegador (`testes/`) e no Node. 11 falhas esperadas: itens 15 (2), 16, 18, 19, 20 (2), 21, 23 e 25 (2). Na 1.8: 82 testes, com 2 falhas esperadas (itens 23 e 25); a do item 18 saiu quando o item foi descartado. Achado novo, registrado como comportamento atual para decidir depois: uma anotação de texto sem cirurgia vira ficha "Sem procedimento". A glosa (item 24) foi descartada. |
 | 4 | Roteiro de teste manual no iPhone | feito (27/10/2026, v1.6) | `ROTEIRO-TESTE.md`, com os dados inventados de `testes/dados`. Novo modo de teste: o endereço com `?teste` usa outro banco (`registro-cirurgias-teste`), mostra uma faixa e não convida a instalar. |
 | 5 | Infraestrutura de atualização: versão dos dados com migrações, aviso "Nova versão disponível", botão "Copiar diagnóstico" | feito (27/10/2026, v1.6) | Versão dos dados em `settings.dataVersion`, com migrações numeradas em `MIGRATIONS` (a 1 é a dos nomes padrão, que já existia). A versão vai junto no backup, e restaurar um backup antigo roda as migrações que faltam. Uma migração pode guardar uma cópia das listas antes de mexer. O aviso de versão nova aparece com o app aberto, e o app confere ao voltar para a tela e a cada hora. "Copiar diagnóstico" leva versão, contagens e os últimos erros, sem nenhum dado das cirurgias. O app também abre o banco quando uma versão mais nova já o atualizou: voltar de versão nunca deixa os dados de fora. |
 | 6 | Dividir o código, se necessário | feito (27/10/2026, v1.4) | Adiantado. O app agora é publicado em arquivos separados (`index.html`, `style.css`, `core.js`, `ui.js`), sem etapa de build: o GitHub guarda o próprio código. O `sw.js` passou a buscar sempre a versão nova quando há internet e a usar a cópia sem internet. Testado: passagem da 1.3 para a 1.4 com os dados mantidos, abertura sem internet e atualização seguinte na primeira recarga. O `ui.js` segue com 131 KB; dividir em módulos só se ficar difícil de editar. |
@@ -41,13 +42,13 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 
 | Nº | Item | Status | Observações |
 |---|---|---|---|
-| 15 | "VLP" antes do procedimento | pendente | Confirmado: "VLP colecisto" vira Colecistectomia videolaparoscópica + Colecistectomia. |
-| 16 | Hora do envio não é hora da cirurgia | pendente | Confirmado: sem hora na legenda, a ficha usa a hora da mensagem. |
-| 17 | Eletiva × urgência e hora de término | pendente | Confirmado: `isUrgent` trata todo horário especial como urgência. Antes de mudar, confirmar a regra que vale para os pagadores dela. |
-| 18 | Estimativa por função e convênio, com base visível | pendente | A estimativa usa só a mediana por procedimento (ou família), sem separar função nem convênio. A referência por convênio já existe, mas só na conferência de urgência. Segundo procedimento: sempre 50%. |
-| 19 | Feriados móveis (Carnaval, Corpus Christi) e datas com ano | pendente | Confirmado: só aceita dia/mês; uma data com ano é ignorada. |
-| 20 | Legenda editada vira duplicata | pendente | Confirmado: a chave da mensagem usa data e hora com segundos mais o começo do texto. |
-| 21 | Colegas com o mesmo primeiro nome | pendente | Confirmado: `mapExecutor` liga um nome completo novo pelo primeiro nome, sem perguntar. |
+| 15 | "VLP" antes do procedimento | feito (27/10/2026, v1.8) | "VLP colecisto" e "VLP colecistectomia" viram só Colecistectomia videolaparoscópica (antes, também a aberta, e a estimativa somava as duas). O "VLP" solto vale para o procedimento do mesmo trecho da legenda; sem ele, para o do trecho anterior. Testes de falha esperada viraram testes normais, mais dois casos novos. |
+| 16 | Hora do envio não é hora da cirurgia | feito (27/10/2026, v1.8) | Sem hora na legenda, a ficha fica sem hora (a hora do envio fica guardada à parte). O app só pede para conferir quando ela muda o valor: "Confira a hora" (envio entre 19h e 7h em dia útil, considerando os feriados da cidade) e "Confira a data" (envio de madrugada). Salvar a edição tira esses avisos. Quando a planilha casa, valem a data e a hora dela (a de antes fica guardada, e desfazer a planilha devolve). A hora do envio continua como pista para casar a planilha com a ficha certa. Migração 3, com cópia das fichas antes: tira a hora do envio das fichas antigas (as que ela editou não mudam). Junto, parte do item 25: linha da planilha sem hora fica sem hora, e não meia-noite. Efeito nos dados reais de teste: o "a receber" estimado caiu cerca de 5%, porque as cirurgias postadas à noite deixam de ganhar os 30% até a hora ser confirmada. |
+| 17 | Eletiva × urgência e hora de término | descartado (27/10/2026) | O Gustavo não sabe a regra dos pagadores dela e decidiu seguir sem o item: não atrapalha o controle. Fica como está: `isUrgent` trata todo horário especial como urgência, e a hora de término não é pedida. |
+| 18 | Estimativa por função e convênio, com base visível | descartado (27/10/2026) | O Gustavo decidiu seguir sem o item: não atrapalha o controle. Fica como está: a estimativa usa a mediana por procedimento (ou família), sem separar função nem convênio, e o segundo procedimento conta pela metade. O teste de falha esperada do item saiu. |
+| 19 | Feriados móveis (Carnaval, Corpus Christi) e datas com ano | feito (27/10/2026, v1.8) | Em Ajustes > Feriados da cidade: Carnaval (segunda e terça) e Corpus Christi como opções, calculados pela Páscoa, e datas com ano (04/06/2026 vale só naquele ano). Data que não existe é recusada. Continua guardado num texto só, que as versões antigas sabem ler. |
+| 20 | Legenda editada vira duplicata | feito (27/10/2026, v1.8) | O aviso "Esta mensagem foi editada" sai do texto e marca a mensagem. A importação reconhece a ficha pela hora exata (com segundos) e pelo número de fotos, sem mudar o formato das chaves: a chave nova entra na ficha e a antiga fica guardada (`chavesAntigas`), para a conversa antiga não duplicar. A tela da importação mostra o antes e o depois. Ficha ainda não mexida (nem paga): o app relê a legenda; ficha mexida: só troca o texto e pede conferência ("Legenda editada"). Desfazer a importação devolve a ficha como era; se ela mexeu na ficha depois (pagamento, edição), volta só a legenda. O teste da chave igual foi trocado pelo de reconhecimento. |
+| 21 | Colegas com o mesmo primeiro nome | feito (27/10/2026, v1.8) | `mapExecutor` não liga mais sozinho pelo primeiro nome: a planilha pergunta "É a mesma pessoa que Bruno?" na primeira vez que um nome completo aparece, e guarda a resposta. Se o colega já tem outro nome completo, ou se dois nomes completos diferentes com o mesmo primeiro nome aparecem na mesma planilha, o app parte de "colega novo" e deixa escolher o colega. |
 
 ## P3 — Financeiro e conciliação do repasse
 
@@ -55,8 +56,8 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 |---|---|---|---|
 | 22 | Modelo financeiro com migração (estimativa, valor devido, recebimentos, saldo) | pendente | Hoje cada ficha tem `status`, `recebido` (um pagamento) e `valorPrevisto`. |
 | 23 | Pagamentos parciais e complementos | pendente | Confirmado: `planRepasse` só procura fichas em aberto. |
-| 24 | Glosa não é recebimento | pendente | |
-| 25 | Revisão completa da planilha antes de gravar | pendente | Confirmado: `groupActs` junta num ato só duas cirurgias do mesmo dia e colega quando a planilha não tem hora. Achado no item 3: linha sem hora vira 00:00 e conta como urgência. |
+| 24 | Glosa não é recebimento | descartado (27/10/2026) | O Gustavo não quer mais. |
+| 25 | Revisão completa da planilha antes de gravar | pendente | Confirmado: `groupActs` junta num ato só duas cirurgias do mesmo dia e colega quando a planilha não tem hora. Achado no item 3: linha sem hora vira 00:00 e conta como urgência. A parte da linha sem hora foi feita na 1.8, junto com o item 16. |
 | 26 | Quanto caiu de fato na conta | pendente | |
 
 ## P4 — Recebimentos e uso diário
@@ -65,8 +66,8 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 |---|---|---|---|
 | 27 | Aba Recebimentos; Ajustes vira ícone no topo do Início | pendente | Muda a navegação: Início · Cirurgias · + · Recebimentos · Relatórios. |
 | 28 | Prazo típico e previsão de 30, 60 e 90 dias | pendente | Hoje "atrasada" é mais de 90 dias para todos (ajustável em Ajustes). |
-| 29 | Cobrar (mensagem pronta para o WhatsApp) | pendente | |
-| 30 | Contestação acompanhada | pendente | |
+| 29 | Cobrar (mensagem pronta para o WhatsApp) | descartado (27/10/2026) | O Gustavo não quer mais. |
+| 30 | Contestação acompanhada | descartado (27/10/2026) | O Gustavo não quer mais. |
 | 31 | "Precisa de atenção" no Início (até 3 linhas) | pendente | Conflita com o pedido de 26/10 (Início só com pendências de cadastro; atrasos em Relatórios). Vale o documento; confirmar ao chegar neste item. |
 | 32 | Salvar a edição conta como conferida | pendente | Hoje salvar só tira o aviso "Sem procedimento". |
 | 33 | Lembrete mensal no Calendário (.ics) | pendente | |
@@ -94,3 +95,5 @@ Nuvem, servidor, contas ou sincronização; integração bancária; IA ou OCR na
 | 27/10/2026 | Versão 1.6, em lote: itens 4, 5, 7, 8 e 9. Modo de teste e roteiro de teste, versão dos dados e aviso de versão nova, diagnóstico, backup em partes, backup depois das importações e restauração segura. Leva também a pasta `testes/` da 1.5, que não subiu com ela. Primeira publicada pelo Claude direto no GitHub. |
 | 27/10/2026 | Versão 1.7, em lote: itens 10 a 14. Lixeira de 30 dias com Desfazer e mensagens ignoradas, desfazer importação do WhatsApp, importação que continua de onde parou, miniaturas numa lista separada (banco na versão 2, com migração) e regra de segurança sem fonte de fora. Pull request #2. |
 | 27/10/2026 | Item 14 fechado: o Gustavo decidiu manter o endereço goborges.github.io, sem publicar outros sites na conta. Fim da fase P1. Só documentação, sem versão nova do app. |
+| 27/10/2026 | Versão 1.8, em lote: itens 15, 16, 19, 20 e 21, e a parte do item 25 sobre linha sem hora. "VLP" antes do procedimento, hora do envio separada da hora da cirurgia (migração 3), feriados móveis, legenda editada sem duplicar e confirmação de colegas com o mesmo primeiro nome. Pull request #4. |
+| 27/10/2026 | Itens 17, 18, 24, 29 e 30 descartados a pedido do Gustavo: o cálculo continua como está. Fim da fase P2. |

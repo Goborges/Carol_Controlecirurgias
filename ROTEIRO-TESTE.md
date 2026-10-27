@@ -10,8 +10,9 @@ No Safari do iPhone, abra cada endereço abaixo e toque em **Baixar**. Se abrir 
 
 1. `goborges.github.io/Carol_Controlecirurgias/testes/dados/conversa-iphone.zip`
 2. `goborges.github.io/Carol_Controlecirurgias/testes/dados/EXEMPLO_LTDA_-_Repasse_-_900001_-_Comp._09.xlsx`
+3. `goborges.github.io/Carol_Controlecirurgias/testes/dados/conversa-iphone-editada.txt` (a mesma conversa, com uma legenda editada)
 
-Os dois ficam em **Arquivos → Downloads**. São inventados: colegas Bruno, Lia e Otávio, pacientes fictícios.
+Os três ficam em **Arquivos → Downloads**. São inventados: colegas Bruno, Lia e Otávio, pacientes fictícios.
 
 ## 1. Testes automáticos
 
@@ -32,15 +33,19 @@ Toque em **Começar → Escolher o arquivo** e escolha `conversa-iphone.zip` em 
 **Deve aparecer:**
 - "Quem é quem?" com Bruno, Lia e Otávio como colegas. Toque em **Continuar**.
 - "12 cirurgias encontradas". Toque em **Trazer para o app**.
-- "Pronto! 12 cirurgias novas no app", com 2 fotos para organizar e o convite "Faça um backup agora".
+- "Pronto! 12 cirurgias novas no app", com "2 fotos para organizar, 3 para completar" e o convite "Faça um backup agora".
 
 Agora teste o desfazer: no "Pronto!", toque em **Desfazer esta importação** e confirme.
 
 **Deve aparecer:** a tela de boas-vindas, vazia de novo. Repita este passo 3 para trazer a conversa outra vez. Desta vez o app não pergunta "Quem é quem?", porque já guardou a resposta.
 
+Depois, em **Cirurgias**, abra a de **4 de setembro** (Apendicectomia videolaparoscópica). **Deve aparecer:** "Hora não informada. A foto foi enviada às 21h40." e, em "Para completar", o pedido para conferir a hora. A legenda não diz a hora, e a foto foi enviada no horário de urgência.
+
 ## 4. Trazer a planilha de exemplo
 
-Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Escolha a data em que o dinheiro caiu e toque em **Confirmar**.
+Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Escolha a data em que o dinheiro caiu.
+
+Em **Confirme os nomes**, o app pergunta se Bruno Teixeira Lima, Lia Monteiro Alves e Otavio Prado Reis são a mesma pessoa que Bruno, Lia e Otávio. Deixe **Sim**. Bruno Carvalho Dias aparece como colega novo, porque já há outro Bruno na planilha. Toque em **Confirmar**.
 
 **Deve aparecer:** "Pronto!", com 5 cirurgias do WhatsApp pagas e 2 cirurgias novas, que não estavam na conversa, e de novo o convite de backup.
 
@@ -56,37 +61,43 @@ Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Esc
 2. Exclua a mesma cirurgia de novo, sem desfazer. Em **Ajustes**, a linha **Lixeira** mostra "1 item". Abra e toque em **Recuperar**: ela volta para a lista.
 3. Em **Ajustes → Conversas do WhatsApp**, **deve aparecer** a conversa trazida, com o botão **Desfazer**. Não toque nele agora.
 
-## 7. Fechar e abrir de novo
+## 7. Legenda editada e feriados
+
+1. Toque em **+ → Conversa do WhatsApp** e escolha `conversa-iphone-editada.txt`. **Deve aparecer** "1 legenda editada", com "Antes: CVL UMC Bruno". Toque em **Trazer para o app**. No "Pronto!", **deve aparecer** "1 legenda editada atualizada".
+2. Em **Cirurgias** continuam 14. A de **20 de setembro** mostra a legenda nova, "CVL UMC Bruno 21h", e embaixo "Editada no WhatsApp. Antes era…".
+3. Em **Ajustes → Feriados da cidade**, **deve aparecer** Carnaval e Corpus Christi, com "Conta" e "Não conta", e o campo com 31/08. Volte sem salvar.
+
+## 8. Fechar e abrir de novo
 
 Feche a aba do Safari e abra outra vez o endereço com `?teste`.
 
 **Deve aparecer:** as mesmas 14 cirurgias.
 
-## 8. Fazer backup
+## 9. Fazer backup
 
 Em **Ajustes → Fazer backup**, toque em **Salvar em Arquivos** e salve no iCloud Drive.
 
 **Deve aparecer:** "Backup salvo". Com poucas fotos sai um arquivo só. Com muitas, o app pede para salvar parte por parte, e todas as partes ficam na mesma pasta.
 
-## 9. Apagar e restaurar
+## 10. Apagar e restaurar
 
 1. Em **Ajustes → Apagar os dados de teste**, confirme duas vezes. **Deve aparecer** a tela de boas-vindas, vazia.
 2. Em **Ajustes → Restaurar um backup**, escolha o arquivo do backup (todas as partes juntas, se houver). **Deve aparecer** "Restaurar o backup?" com 14 cirurgias.
 3. Toque em **Restaurar**. **Deve aparecer** "Backup restaurado." e as 14 cirurgias de volta, com as fotos.
 
-## 10. Diagnóstico
+## 11. Diagnóstico
 
 Em **Ajustes → Copiar diagnóstico**, toque em **Copiar** e cole numa conversa.
 
 **Deve aparecer:** a versão do app, "modo de teste" e contagens, sem nenhum nome, procedimento ou valor.
 
-## 11. Sair do modo de teste
+## 12. Sair do modo de teste
 
 Toque em **Sair do modo de teste**, na faixa amarela.
 
 **Deve aparecer:** o app de verdade, sem nenhuma das 14 cirurgias de teste.
 
-## 12. O app instalado
+## 13. O app instalado
 
 1. Abra pelo ícone. Em Ajustes, no fim, aparece a versão nova. Na primeira abertura depois de uma versão que mexe no banco, o app pode mostrar "Atualizando o app" por alguns segundos.
 2. Ligue o modo avião e abra pelo ícone. O app abre normalmente. Depois desligue o modo avião.
