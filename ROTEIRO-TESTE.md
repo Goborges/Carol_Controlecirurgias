@@ -63,7 +63,9 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 - **Barra de baixo:** Início · Cirurgias · + · Recebimentos · Relatórios.
 - **Recebimentos** (ou toque no cartão "Para receber"): o que falta receber, o que entrou no mês, "Quando deve cair", com os próximos 30, 60 e 90 dias, e o histórico, com a planilha nº 900001.
 - **Cirurgias:** 14 cirurgias.
+- **Relatórios:** no topo, "14 cirurgias · R$ 2.820 recebidos · ≈ R$ … a receber". Em **Meses**, "Quanto rendeu cada mês" e "Quanto entrou em cada mês", com R$ 2.800 neste mês, o mesmo valor do Início.
 - **Relatórios → Tabela:** 14 linhas, da mais nova para a mais antiga.
+- **Relatórios → Relatório do ano:** **deve aparecer** R$ 2.819,73 liberados, "Caiu na conta: R$ 2.800,00" e os quadros por fonte pagadora, hospital, colega e convênio. Toque em **Imprimir ou salvar em PDF**. Abre a tela de impressão do iPhone. Para guardar o PDF, toque em **Compartilhar → Salvar em Arquivos**. Confira se o PDF mostra os quadros mês a mês, numa folha deitada.
 
 ## 6. Pagamento em parte
 

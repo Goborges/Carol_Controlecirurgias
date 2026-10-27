@@ -459,3 +459,23 @@ textarea.diag { font: .8125rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospa
 .ritem.rv .rmain .m { white-space: normal; display: block; }
 .lx-ph { width: 46px; height: 46px; border-radius: 12px; overflow: hidden; background: var(--fill); display: grid; place-items: center; color: var(--muted); }
 .lx-ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* relatório do ano: só ele aparece na impressão, numa folha deitada */
+#print-area { display: none; }
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+  body > *:not(#print-area) { display: none !important; }
+  body::before { display: none !important; }
+  #print-area { display: block; color: #000; font: 9pt/1.35 var(--font-ui); }
+  #print-area h1 { font-size: 15pt; margin: 0 0 4pt; }
+  #print-area h2 { font-size: 11pt; margin: 12pt 0 4pt; }
+  #print-area p { margin: 0 0 6pt; }
+  #print-area section { break-inside: avoid; }
+  #print-area table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; }
+  #print-area th:first-child { width: 18%; }
+  #print-area th, #print-area td { border-bottom: .5pt solid #bbb; padding: 2pt 3pt; text-align: right; white-space: nowrap; }
+  #print-area tbody th, #print-area tfoot th { text-align: left; white-space: normal; }
+  #print-area thead th { border-bottom: 1pt solid #000; }
+  #print-area tfoot th, #print-area tfoot td { font-weight: 700; border-top: 1pt solid #000; }
+  #print-area .pe { font-size: 8pt; color: #333; }
+}

@@ -471,6 +471,53 @@
       igual([p.atrasadas.valor, p.semPrazo.valor, p.depois.n], [300, 70, 0], 'atrasadas e sem previsão');
     });
 
+    // ---------- relatórios ----------
+    const carteira = () => {
+      const pg = (valor, data, extra) => ({ id: 'p' + valor + data, valor, data, origem: 'manual', ...(extra || {}) });
+      const recs = [
+        { id: 'r1', date: '2026-09-02', hosp: 'UMC', conv: 'Plano A', cols: ['Bruno'], devido: 444.02, devidoOrigem: 'repasse', devidoAntes: { valor: 500, origem: 'combinado' }, pagamentos: [pg(444.02, '2026-10-05', { origem: 'repasse', repId: 'A' })] },
+        { id: 'r2', date: '2026-09-10', hosp: 'UMC', conv: 'Plano A', cols: ['Bruno', 'Lia'], devido: 300, devidoOrigem: 'repasse', pagamentos: [pg(300, '2026-10-05', { origem: 'repasse', repId: 'A' })] },
+        { id: 'r3', date: '2026-08-20', hosp: 'HC', conv: 'Plano B', cols: ['Lia'], devido: 350, devidoOrigem: 'combinado', pagamentos: [pg(100, '2026-09-15', { fonte: 'Lia', parcial: true })] },
+        { id: 'r4', date: '2026-09-25', hosp: null, conv: null, cols: [], devido: null, pagamentos: [] },
+        { id: 'r5', date: '2026-09-26', hosp: 'HC', conv: null, cols: [], status: 'semcobranca', devido: null, pagamentos: [] },
+        { id: 'r6', date: '2025-12-10', hosp: 'HC', conv: null, cols: ['Otávio'], devido: 900, devidoOrigem: 'combinado', pagamentos: [pg(1000, '2025-12-30')] }];
+      const reps = [{ id: 'A', total: 744.02, caiu: 700, hosp: 'UMC', pay: '2026-10-05' }];
+      const aberto = (r) => (r.id === 'r3' ? { valor: 250, aprox: false } : { valor: 200, aprox: true });
+      return { recs, reps, aberto };
+    };
+    const soma = (m, k) => Math.round([...m.values()].reduce((t, o) => t + o[k], 0) * 100) / 100;
+    teste('Relatórios', 'o que caiu na conta é dividido entre os pagamentos da planilha, sem perder centavo', () => {
+      const { recs, reps } = carteira();
+      const pags = C.pagamentosComValor(recs, reps).filter((x) => x.p.repId === 'A');
+      igual([pags.map((x) => x.entrou), Math.round(pags.reduce((t, x) => t + x.entrou, 0) * 100) / 100], [[417.75, 282.25], 700], 'proporção');
+      const comZero = C.pagamentosComValor([{ id: 'z', pagamentos: [{ valor: 0.01, data: '2026-10-05', origem: 'repasse', repId: 'B' }, { valor: 10, data: '2026-10-05', origem: 'repasse', repId: 'B' }, { valor: 0, data: '2026-10-05', origem: 'repasse', repId: 'B' }] }], [{ id: 'B', total: 10.01, caiu: 9 }]);
+      igual(comZero.map((x) => x.entrou), [0.01, 8.99, 0], 'os centavos vão no maior; a linha de R$ 0,00 continua zero');
+    });
+    teste('Relatórios', 'os totais batem: mês da cirurgia, hospital, convênio e mês do pagamento', () => {
+      const { recs, reps, aberto } = carteira(); const rel = C.relatorio(recs, reps, aberto); const t = rel.totais;
+      igual([t.n, t.nRec, t.nAb, t.recebido, t.aReceber, t.aprox, t.entrou], [6, 3, 2, 1844.02, 450, true, 1800], 'totais');
+      igual([soma(rel.mesCirurgia, 'recebido'), soma(rel.por.hospital, 'recebido'), soma(rel.por.convenio, 'recebido'), soma(rel.mesPagamento, 'recebido')], [1844.02, 1844.02, 1844.02, 1844.02], 'recebido em cada relatório');
+      igual([soma(rel.mesCirurgia, 'aReceber'), soma(rel.por.hospital, 'aReceber'), soma(rel.mesCirurgia, 'n')], [450, 450, 6], 'a receber e quantidade');
+      igual(soma(rel.mesPagamento, 'entrou'), Math.round((t.recebido - (744.02 - 700)) * 100) / 100, 'o que entrou = o liberado menos as retenções');
+      igual(rel.por.hospital.get('Sem hospital').aReceber, 200, 'cirurgia sem hospital tem a linha dela');
+    });
+    teste('Relatórios', 'cirurgia com dois colegas entra nos dois', () => {
+      const { recs, reps, aberto } = carteira(); const rel = C.relatorio(recs, reps, aberto);
+      igual([rel.por.colega.get('Bruno').recebido, rel.por.colega.get('Lia').recebido, soma(rel.por.colega, 'recebido')], [744.02, 400, 2144.02], 'colegas');
+    });
+    teste('Relatórios', 'diferenças de valor: combinado × planilha e recebido a mais', () => {
+      const { recs, reps, aberto } = carteira(); const d = C.relatorio(recs, reps, aberto).diferencas;
+      igual(d.map((x) => [x.r.id, x.tipo, x.combinado || null, x.devido, x.recebido]), [['r1', 'combinado', 500, 444.02, 444.02], ['r6', 'a-mais', null, 900, 1000]], 'diferenças');
+    });
+    teste('Relatórios', 'ano para o Imposto de Renda: mês a mês, por fonte pagadora, hospital, colega e convênio', () => {
+      const { recs, reps } = carteira(); const a = C.relatorioAnual(recs, reps, 2026);
+      igual([a.meses[8], a.meses[9], a.total, a.totalEntrou, a.n], [100, 744.02, 844.02, 800, 3], 'meses e total');
+      igual([...a.porFonte].map(([k, o]) => [k, o.total]), [['UMC', 744.02], ['Lia', 100]], 'fonte: o hospital da planilha; à mão, quem pagou');
+      igual([soma(a.porFonte, 'total'), soma(a.porHospital, 'total'), soma(a.porConvenio, 'total')], [844.02, 844.02, 844.02], 'cada quadro soma o total');
+      igual([...C.relatorioAnual(recs, reps, 2025).porFonte].map(([k, o]) => [k, o.total]), [['HC', 1000]], 'sem quem pagou, o hospital da cirurgia');
+      igual(C.anosComPagamento(recs), ['2026', '2025'], 'anos');
+    });
+
     // ---------- lembrete mensal ----------
     teste('Lembrete', 'evento todo mês no dia escolhido, começando no próximo, com o ritual', () => {
       const ics = C.lembreteIcs({ dia: 5, hora: '19:00', hoje: '2026-12-27', agora: new Date(Date.UTC(2026, 11, 27, 15, 0, 0)) });
