@@ -1,0 +1,19 @@
+[01/09/2026, 08:00:00] Cirurgias Teste: ‎As mensagens e as chamadas são protegidas com a criptografia de ponta a ponta e ficam somente entre você e os participantes desta conversa.
+[01/09/2026, 08:00:01] Cirurgias Teste: ‎Você criou o grupo “Cirurgias Teste”
+[02/09/2026, 10:15:22] Ana Exemplo: CVL Bruno UMC ‎<anexado: 00000003-PHOTO-2026-09-02-10-15-22.jpg>
+[02/09/2026, 10:15:23] Ana Exemplo: ‎<anexado: 00000004-PHOTO-2026-09-02-10-15-23.jpg>
+[04/09/2026, 21:40:10] Ana Exemplo: APVL Mater Dei Lia ‎<anexado: 00000005-PHOTO-2026-09-04-21-40-10.jpg>
+[05/09/2026, 14:05:00] Ana Exemplo: ‎<anexado: 00000006-PHOTO-2026-09-05-14-05-00.jpg>
+[05/09/2026, 14:07:30] Ana Exemplo: LE + drenagem de abscesso Genoveva Otávio 13h
+[08/09/2026, 16:20:00] Ana Exemplo: VLP colecisto UMC Bruno ‎<anexado: 00000007-PHOTO-2026-09-08-16-20-00.jpg>
+[09/09/2026, 09:10:00] Ana Exemplo: Colecistectomia VLP Santa Clara Lia ‎<anexado: 00000008-PHOTO-2026-09-09-09-10-00.jpg>
+[09/09/2026, 11:45:00] Ana Exemplo: Convertida para colecistectomia aberta
+[10/09/2026, 09:00:00] Ana Exemplo: ‎<anexado: 00000009-PHOTO-2026-09-10-09-00-00.jpg>
+[10/09/2026, 09:00:02] Ana Exemplo: ‎<anexado: 00000010-PHOTO-2026-09-10-09-00-02.jpg>
+[12/09/2026, 11:30:00] Ana Exemplo: 07/09 hérnia UMC Bruno ‎<anexado: 00000011-PHOTO-2026-09-12-11-30-00.jpg>
+[15/09/2026, 18:45:10] Ana Exemplo: Fechamento de parede UMC Lia 18:30 ‎<anexado: 00000012-PHOTO-2026-09-15-18-45-10.jpg>
+[16/09/2026, 07:20:00] Ana Exemplo: CVL UMC Otávio ‎imagem ocultada
+[17/09/2026, 08:30:00] Ana Exemplo: CVL UMC Bruno ‎<anexado: 00000013-PHOTO-2026-09-17-08-30-00.jpg>
+[17/09/2026, 15:10:00] Ana Exemplo: CVL UMC Bruno ‎<anexado: 00000014-PHOTO-2026-09-17-15-10-00.jpg>
+[19/09/2026, 10:00:00] Ana Exemplo: Lembrar de ver o repasse de agosto
+[20/09/2026, 22:10:05] Ana Exemplo: CVL UMC Bruno 21h ‎<anexado: 00000015-PHOTO-2026-09-20-22-10-05.jpg> ‎<Esta mensagem foi editada>
