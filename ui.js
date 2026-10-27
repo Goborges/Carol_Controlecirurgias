@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.9';
+  const VERSION = '1.10';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -68,6 +68,7 @@
     user: '<circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>',
     cal: '<rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 9.5h16M8.5 3v4M15.5 3v4"/>',
     info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.8h.01"/>',
+    bell: '<path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.5 1.5H5l1.5-1.5Z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>',
     folder: '<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   };
   function icon(name, cls) {
@@ -289,6 +290,7 @@
     S.hol = C.parseExtraHolidays(S.settings.feriados);
     S.refs = C.buildRefs(S.records, S.hol);
     S.checks = C.urgencyChecks(S.records, S.refs, S.hol);
+    S.prazos = C.prazosDePagamento(S.records);
   }
   function applyTheme() { document.documentElement.setAttribute('data-tema', S.settings.tema || 'ameixa'); }
   const saveSettings = () => Store.put('meta', S.settings);
@@ -416,7 +418,8 @@
   const isOpen = (r) => C.emAberto(r);              // a receber, inclusive as pagas só em parte
   const isPaid = (r) => sit(r) === 'recebido';
   const urgOf = (r) => C.isUrgent(r.date, r.time, S.hol);
-  const isLate = (r) => isOpen(r) && daysSince(r.date) > S.settings.alertDias;
+  // atrasada: passou do prazo de costume de quem paga (hospital, convênio ou colega); sem histórico, o padrão de Ajustes
+  const isLate = (r) => isOpen(r) && daysSince(r.date) > C.limiteAtraso(r, S.prazos || new Map(), S.settings.alertDias);
   // o que falta no cadastro: avisos da importação + procedimento, hospital ou colega em branco.
   // "Está tudo certo" (conferido) cala os campos em branco; quem marcou "sem cobrança" não é cobrada disso.
   function pendencias(r) {
@@ -488,7 +491,6 @@
     if (f === 'Legenda editada') return `A legenda foi editada no WhatsApp depois que você mexeu nesta ficha. Antes era: “${(r && r.legendaAnterior) || ''}”. Confira se a ficha continua certa.`;
     return FLAG_TXT[f] || (/convers|observa/i.test(f) ? 'A legenda tem uma observação depois da cirurgia. Confira o procedimento.' : f);
   }
-  const AVISOS_DE_HORA = ['Confira a hora', 'Confira a data'];
   const namesOf = (type) => S.terms.filter((t) => t.type === type).map((t) => t.name).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   function topUsed(kind, n) {
     const cnt = new Map();
@@ -913,13 +915,15 @@
     const late = S.records.filter(isLate);
     const lateVal = late.reduce((s, r) => s + (valueOf(r).v || 0), 0);
     const watch = [];
-    if (late.length) watch.push(rowBtn('clock', 'danger', plural(late.length, 'cirurgia esperando pagamento', 'cirurgias esperando pagamento'), `há mais de ${S.settings.alertDias} dias${lateVal ? `, cerca de ${brl0(lateVal)}` : ''}`, () => go('lista', { status: 'atrasadas' })));
+    if (late.length) watch.push(rowBtn('clock', 'danger', plural(late.length, 'cirurgia esperando pagamento', 'cirurgias esperando pagamento'), `passaram do prazo de costume${lateVal ? `, cerca de ${brl0(lateVal)}` : ''}`, () => go('lista', { status: 'atrasadas' })));
     if (S.checks.length) watch.push(rowBtn('moon', 'night', plural(S.checks.length, 'pagamento sem o adicional noturno', 'pagamentos sem o adicional noturno'), 'feitas à noite, no fim de semana ou em feriado', () => { S.relTab = 'totais'; render(); const el = $('#sec-conferir') || $('#sec-convenios'); if (el) el.scrollIntoView({ block: 'start' }); }));
     const rows = [...keys].reverse().map((k) => { const o = by.get(k); const [a, b] = moneyLines(o);
       return rowBtn(null, null, monthName(k), plural(o.n, 'cirurgia', 'cirurgias'), null, h('span', { class: 'v' }, a, b ? h('small', null, b) : null)); });
     const pays = recebidoPorMes();
     const out = [chart];
     if (watch.length) out.push(h('section', { class: 'sec' }, secTitle('Para acompanhar'), h('div', { class: 'group' }, watch)));
+    const prev = previsao();
+    if (prev) out.push(prev);
     out.push(h('section', { class: 'sec' }, secTitle('Mês a mês'), h('p', { class: 'note' }, 'Pelo mês em que a cirurgia foi feita.'), h('div', { class: 'group flat' }, rows)));
     if (pays.size) out.push(h('section', { class: 'sec' }, secTitle('Dinheiro que entrou'), h('p', { class: 'note' }, 'Pelo mês em que o pagamento caiu.'),
       h('div', { class: 'group flat' }, [...pays.keys()].sort().reverse().map((k) => rowBtn(null, null, monthName(k), null, null, h('span', { class: 'v' }, brl(pays.get(k))))))));
@@ -971,11 +975,12 @@
       rowBtn('trash', '', 'Lixeira', S.trash.length ? `${plural(S.trash.length, 'item', 'itens')} dos últimos ${LIXEIRA_DIAS} dias` : 'Vazia', () => sheetLixeira())]));
     out.push(sec('Preferências', [
       rowBtn('user', 'plain', 'Seu nome', S.settings.nome || 'Para o app te cumprimentar', async () => { const v = await formDialog({ title: 'Seu nome', fields: [{ id: 'n', label: 'Como você quer ser chamada', value: S.settings.nome }] }); if (v) { S.settings.nome = v.n.trim(); await saveSettings(); render(); } }),
-      rowBtn('clock', 'danger', 'Aviso de atraso', `Depois de ${S.settings.alertDias} dias sem pagamento`, async () => {
-        const v = await formDialog({ title: 'Aviso de atraso', text: 'Depois de quantos dias sem pagamento uma cirurgia aparece como atrasada?', fields: [{ id: 'd', label: 'Dias', type: 'number', inputmode: 'numeric', value: S.settings.alertDias }] });
+      rowBtn('clock', 'danger', 'Aviso de atraso', `Pelo prazo de costume de quem paga. Sem histórico, depois de ${S.settings.alertDias} dias`, async () => {
+        const v = await formDialog({ title: 'Aviso de atraso', text: 'Com histórico, o app usa o prazo de costume de cada hospital, convênio ou colega. Sem histórico, depois de quantos dias sem pagamento a cirurgia aparece como atrasada?', fields: [{ id: 'd', label: 'Dias', type: 'number', inputmode: 'numeric', value: S.settings.alertDias }] });
         if (v && +v.d > 0) { S.settings.alertDias = Math.round(+v.d); await saveSettings(); render(); }
       }),
       rowBtn('cal', 'night', 'Feriados da cidade', feriadosTxt() || 'Nenhum', () => sheetFeriados()),
+      rowBtn('bell', 'ok', 'Lembrete no Calendário', S.settings.lembrete ? `Todo dia ${S.settings.lembrete.dia}, às ${horaTxt(S.settings.lembrete.hora)}` : 'Conversa, planilha e backup, todo mês', () => sheetLembrete()),
       rowBtn('lock', 'warn', 'Senha para abrir', S.settings.pinHash ? 'Ligada' : 'Desligada', () => sheetPin())]));
     out.push(h('div', { class: 'group' },
       h('div', { class: 'rowbtn' }, h('span', { class: 'bubble plain' }, icon('info')), h('span', { class: 't' }, 'Versão ' + VERSION, h('small', { id: 'storage-info' }, PREVIEW ? 'Prévia com cirurgias de exemplo. Nada fica salvo aqui.' : S.storage === 'memory' ? 'Nada está sendo salvo' : 'Os dados ficam só neste aparelho'))),
@@ -983,6 +988,50 @@
       h('button', { class: 'rowbtn danger', type: 'button', onclick: () => wipeAll() }, h('span', { class: 'bubble danger' }, icon('trash')), h('span', { class: 't' }, TESTE ? 'Apagar os dados de teste' : 'Apagar todos os dados'))));
     if (navigator.storage && navigator.storage.estimate && S.storage !== 'memory') navigator.storage.estimate().then((e) => { const el = $('#storage-info'); if (el && e.usage) el.textContent = `Os dados ficam só neste aparelho (${(e.usage / 1048576).toFixed(1).replace('.', ',')} MB)`; }).catch(() => {});
     return out;
+  }
+  // ---- prazo e previsão (item 28) ----
+  function quandoCai(r, pz) {
+    const alvo = C.fromDayNum(C.dayNum(r.date) + pz.tipico);
+    return alvo >= today() ? `Deve cair por volta de ${ddmm(alvo)}: ${pz.nome} costuma pagar em cerca de ${pz.tipico} dias.`
+      : `Já pode cair a qualquer momento: ${pz.nome} costuma pagar em cerca de ${pz.tipico} dias.`;
+  }
+  // Quanto deve cair nos próximos 30, 60 e 90 dias, pelo prazo de costume de cada pagador (as atrasadas ficam em
+  // "Para acompanhar"). Sem histórico de quem paga, a cirurgia fica sem previsão, em vez de inventar uma data.
+  function previsao() {
+    const itens = S.records.filter(isOpen).map((r) => { const f = fin(r); return { r, valor: f.aReceber, aprox: f.aprox }; });
+    if (!itens.length) return null;
+    const p = C.previsaoRecebimento(itens, S.prazos || new Map(), today(), S.settings.alertDias);
+    const val = (o) => (o.valor ? (o.aprox ? '≈ ' : '') + brl0(o.valor) : '—');
+    const nomes = ['Nos próximos 30 dias', 'De 31 a 60 dias', 'De 61 a 90 dias'];
+    const linhas = p.faixas.map((o, i) => rowBtn(null, null, nomes[i], o.n ? plural(o.n, 'cirurgia', 'cirurgias') : 'Nenhuma cirurgia', null, h('span', { class: 'v' }, val(o))));
+    if (p.depois.n) linhas.push(rowBtn(null, null, 'Depois de 90 dias', plural(p.depois.n, 'cirurgia', 'cirurgias'), null, h('span', { class: 'v' }, val(p.depois))));
+    const nota = ['Pelo prazo de costume de cada hospital, convênio ou colega.',
+      p.semPrazo.n ? `${plural(p.semPrazo.n, 'cirurgia fica', 'cirurgias ficam')} sem previsão: quem paga ainda não tem histórico.` : null].filter(Boolean).join(' ');
+    return h('section', { class: 'sec', id: 'sec-previsao' }, secTitle('Quando deve cair'), h('p', { class: 'note' }, nota), h('div', { class: 'group flat' }, linhas));
+  }
+  // ---- lembrete mensal no Calendário (item 33) ----
+  function sheetLembrete() {
+    const lb = S.settings.lembrete || {};
+    let dia = lb.dia || 5, hora = lb.hora || '19:00';
+    return openSheet({ title: 'Lembrete no Calendário', back: true, render(api) {
+      const diaSel = h('select', { id: 'lb-dia', 'aria-label': 'Dia do mês', onchange: (e) => { dia = +e.target.value; } },
+        Array.from({ length: 28 }, (_, i) => h('option', { value: String(i + 1), selected: i + 1 === dia }, 'Dia ' + (i + 1))));
+      const horaIn = h('input', { id: 'lb-hora', type: 'time', value: hora, oninput: (e) => { hora = e.target.value || '19:00'; } });
+      return { body: [
+        h('p', { class: 'note' }, 'Uma vez por mês, o Calendário do iPhone lembra você de:'),
+        h('ol', { class: 'steps' }, h('li', null, h('span', null, 'Exportar a conversa do grupo do WhatsApp, com as fotos, e trazer para o app.')),
+          h('li', null, h('span', null, 'Trazer a planilha de repasse do mês.')), h('li', null, h('span', null, 'Fazer um backup.'))),
+        h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, h('div', { class: 'grid2' }, field('Dia do mês', diaSel), field('Hora', horaIn))),
+        h('p', { class: 'note' }, 'Toque em Criar o lembrete e salve o arquivo. Depois, abra o arquivo em Arquivos e toque em Adicionar ao Calendário.')],
+        foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+          if (PREVIEW) { await confirmDialog({ title: 'Disponível no app instalado', text: 'Nesta prévia o navegador não deixa salvar arquivos.', ok: 'Entendi', cancel: false }); return; }
+          const ics = C.lembreteIcs({ dia, hora, hoje: today() });
+          if (await compartilhar(new Blob([ics], { type: 'text/calendar' }), 'lembrete-controle-de-cirurgias.ics', 'text/calendar')) {
+            S.settings.lembrete = { dia, hora }; await saveSettings(); render(); api.close(true);
+            toast('Agora abra o arquivo em Arquivos e toque em Adicionar ao Calendário.', 5000);
+          }
+        } }, 'Criar o lembrete') };
+    } });
   }
   // ---- feriados da cidade ----
   // Guardados num texto só (como nas versões antigas): datas "31/08" (todo ano) ou "04/06/2026" (só naquele ano) e as
@@ -1134,9 +1183,9 @@
       const x = draft;
       for (const f of pendingAdds) f();
       if (!x.date) { toast('Coloque a data da cirurgia.'); return; }
-      if (x.procs.length) x.revisar = (x.revisar || []).filter((f) => f !== 'Sem procedimento');
-      // ela viu a data e a hora no formulário: os avisos sobre a hora do envio saem
-      x.revisar = (x.revisar || []).filter((f) => !AVISOS_DE_HORA.includes(f));
+      // ela conferiu a ficha ao salvar: os avisos da importação saem ("Procedimento novo", hora do envio, legenda editada).
+      // O que continua em branco (procedimento, hospital, colega) segue em Para completar até ser preenchido.
+      x.revisar = [];
       if (x.horaDaPlanilha && (x.time !== d.time || x.date !== d.date)) delete x.horaDaPlanilha;
       const learned = await learnTerms(x);
       if (isNew) { S.settings.seq += 1; x.num = S.settings.seq; await saveSettings(); }
@@ -1189,14 +1238,15 @@
           h('div', { class: 'amount' + (f.semValorAnotado ? ' txt' : '') }, f.semValorAnotado ? 'Valor não informado' : brl(f.recebido)))),
         fin_, desfazer);
     }
-    const v = valueOf(d); const dias = daysSince(d.date);
+    const v = valueOf(d); const dias = daysSince(d.date); const pz = C.prazoDe(d, S.prazos || new Map());
     const titulo = f.s === 'parcial' ? 'Falta receber' : f.devido != null && f.origem === 'combinado' ? 'Valor combinado' : 'A receber';
     const dica = v.kind === 'estimado' ? (f.s === 'parcial' ? `Aproximado: a estimativa menos os ${brl(f.recebido)} que já entraram.` : `Valor aproximado, pela média do que você já recebeu${v.parcial ? '. Um dos procedimentos ainda não tem referência' : ''}.`)
       : v.kind === 'semvalor' ? (f.s === 'parcial' ? `Já entraram ${brl(f.recebido)}. Quando souber o valor todo, coloque em Editar, como valor combinado.` : 'Ainda não há planilha com esse procedimento para estimar o valor.') : null;
     return h('div', { class: 'paycard' },
       h('div', { class: 'top' }, h('div', null, h('div', { class: 'what' }, titulo), h('div', { class: 'amount' + (v.kind === 'estimado' ? ' aprox' : '') + (v.v == null ? ' txt' : '') }, v.v == null ? 'Sem valor ainda' : (v.kind === 'estimado' ? '≈ ' : '') + brl(v.v))), statusOf(d)[1] === 'accent' ? null : statusTag(d)),
       dica ? h('div', { class: 'hint' }, dica) : null,
-      isLate(d) ? h('div', { class: 'alert-line' }, `Esperando há ${dias} dias.`) : null,
+      isLate(d) ? h('div', { class: 'alert-line' }, `Esperando há ${dias} dias.${pz ? ` ${pz.nome} costuma pagar em até ${pz.limite} dias.` : ''}`)
+        : pz ? h('div', { class: 'hint' }, quandoCai(d, pz)) : null,
       fin_,
       h('div', { class: 'btnrow' },
         h('button', { class: 'btn primary', type: 'button', onclick: () => registrarPagamento(d, persist) }, f.s === 'parcial' ? 'Registrar pagamento' : 'Já recebi'),

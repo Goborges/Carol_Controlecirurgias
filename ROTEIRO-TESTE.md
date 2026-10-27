@@ -41,6 +41,8 @@ Agora teste o desfazer: no "Pronto!", toque em **Desfazer esta importação** e 
 
 Depois, em **Cirurgias**, abra a de **4 de setembro** (Apendicectomia videolaparoscópica). **Deve aparecer:** "Hora não informada. A foto foi enviada às 21h40." e, em "Para completar", o pedido para conferir a hora. A legenda não diz a hora, e a foto foi enviada no horário de urgência.
 
+Toque em **Editar** e, sem mudar nada, em **Salvar**. **Deve aparecer:** a ficha sem o "Para completar". Salvar já conta como conferida.
+
 ## 4. Trazer a planilha de exemplo
 
 Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Escolha a data em que o dinheiro caiu.
@@ -57,6 +59,7 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 
 - **Início:** o cartão "Para receber" com valor; embaixo dele, "Recebido em" este mês com R$ 2.800, o que caiu na conta. Em "Para completar", cirurgias e fotos sem legenda.
 - **Cirurgias:** 14 cirurgias.
+- **Relatórios → Meses:** a parte "Quando deve cair", com os próximos 30, 60 e 90 dias, pelo prazo de costume de quem paga.
 - **Relatórios → Tabela:** 14 linhas, da mais nova para a mais antiga.
 
 ## 6. Pagamento em parte
@@ -73,11 +76,12 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 2. Exclua a mesma cirurgia de novo, sem desfazer. Em **Ajustes**, a linha **Lixeira** mostra "1 item". Abra e toque em **Recuperar**: ela volta para a lista.
 3. Em **Ajustes → Conversas do WhatsApp**, **deve aparecer** a conversa trazida, com o botão **Desfazer**. Não toque nele agora.
 
-## 8. Legenda editada e feriados
+## 8. Legenda editada, feriados e lembrete
 
 1. Toque em **+ → Conversa do WhatsApp** e escolha `conversa-iphone-editada.txt`. **Deve aparecer** "1 legenda editada", com "Antes: CVL UMC Bruno". Toque em **Trazer para o app**. No "Pronto!", **deve aparecer** "1 legenda editada atualizada".
 2. Em **Cirurgias** continuam 14. A de **20 de setembro** mostra a legenda nova, "CVL UMC Bruno 21h", e embaixo "Editada no WhatsApp. Antes era…".
 3. Em **Ajustes → Feriados da cidade**, **deve aparecer** Carnaval e Corpus Christi, com "Conta" e "Não conta", e o campo com 31/08. Volte sem salvar.
+4. Em **Ajustes → Lembrete no Calendário**, toque em **Criar o lembrete** e salve o arquivo em Arquivos. Abra o arquivo em **Arquivos**. **Deve aparecer** o evento "Controle de Cirurgias: conversa, planilha e backup", todo dia 5, às 19h. Toque em **Adicionar ao Calendário** e confira no Calendário. Depois, se quiser, apague o evento.
 
 ## 9. Fechar e abrir de novo
 
