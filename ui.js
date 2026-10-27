@@ -3,8 +3,21 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.5';
+  const VERSION = '1.6';
   const TERMS_VERSION = 1;
+  // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
+  const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
+  const DB_NAME = TESTE ? 'registro-cirurgias-teste' : 'registro-cirurgias';
+  const DB_VERSION = 1;   // sobe quando o banco ganha uma lista nova
+  // ================= erros recentes (aparecem no diagnóstico; sem dados das cirurgias) =================
+  const ERROS = [];
+  function anotaErro(msg, onde) {
+    ERROS.push({ em: new Date().toISOString(), msg: String(msg || 'erro').slice(0, 240), onde: String(onde || '').slice(0, 80) });
+    while (ERROS.length > 20) ERROS.shift();
+    try { if (Store.ready() && S.storage === 'idb') Store.put('meta', { k: 'erros', lista: ERROS.slice() }).catch(() => {}); } catch (e) { /* banco ainda não aberto */ }
+  }
+  window.addEventListener('error', (e) => anotaErro(e.message, ((e.filename || '').split('/').pop() || '') + (e.lineno ? ':' + e.lineno : '')));
+  window.addEventListener('unhandledrejection', (e) => anotaErro((e.reason && e.reason.message) || e.reason, 'promessa'));
   const $ = (s, el) => (el || document).querySelector(s);
 
   // ================= DOM =================
@@ -104,16 +117,22 @@
   const Store = (() => {
     let db = null, mem = null;
     const useMem = () => { mem = {}; STORES.forEach((s) => (mem[s] = new Map())); };
+    // Abre o banco na versão que este app conhece. Se ele já estiver numa versão mais nova (aberto por um app mais novo),
+    // abre como está: voltar uma versão do app nunca deixa os dados de fora.
+    const abrir = (versao) => new Promise((res, rej) => {
+      const rq = versao ? indexedDB.open(DB_NAME, versao) : indexedDB.open(DB_NAME);
+      rq.onupgradeneeded = () => { const d = rq.result; for (const s of STORES) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: KEYS[s] || 'id' }); };
+      rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
+    });
     async function open() {
       if (PREVIEW || !('indexedDB' in window)) { useMem(); return 'memory'; }
       try {
-        db = await new Promise((res, rej) => {
-          const rq = indexedDB.open('registro-cirurgias', 1);
-          rq.onupgradeneeded = () => { const d = rq.result; for (const s of STORES) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: KEYS[s] || 'id' }); };
-          rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
-        });
+        try { db = await abrir(DB_VERSION); } catch (e) { if (e && e.name === 'VersionError') db = await abrir(0); else throw e; }
+        if (STORES.some((s) => !db.objectStoreNames.contains(s))) throw new Error('o banco não tem as listas esperadas');
+        // uma versão mais nova do app, aberta em outra janela, precisa mexer no banco: esta janela solta e pede para atualizar
+        db.onversionchange = () => { db.close(); showUpdate(); };
         return 'idb';
-      } catch (e) { useMem(); return 'memory'; }
+      } catch (e) { anotaErro(e && (e.message || e.name), 'abrir o banco'); db = null; useMem(); return 'memory'; }
     }
     const keyOf = (s, v) => v[KEYS[s] || 'id'];
     function run(s, mode, fn) {
@@ -124,17 +143,29 @@
     }
     return {
       open,
+      ready: () => !!(db || mem),
       all: (s) => (mem ? Promise.resolve([...mem[s].values()]) : run(s, 'readonly', (st) => st.getAll())),
       get: (s, k) => (mem ? Promise.resolve(mem[s].get(k)) : run(s, 'readonly', (st) => st.get(k))),
       put: (s, v) => (mem ? (mem[s].set(keyOf(s, v), v), Promise.resolve()) : run(s, 'readwrite', (st) => st.put(v))),
       putMany: (s, arr) => (mem ? (arr.forEach((v) => mem[s].set(keyOf(s, v), v)), Promise.resolve()) : (arr.length ? run(s, 'readwrite', (st) => { arr.forEach((v) => st.put(v)); return null; }) : Promise.resolve())),
       del: (s, k) => (mem ? (mem[s].delete(k), Promise.resolve()) : run(s, 'readwrite', (st) => st.delete(k))),
       clear: (s) => (mem ? (mem[s].clear(), Promise.resolve()) : run(s, 'readwrite', (st) => st.clear())),
+      keys: (s) => (mem ? Promise.resolve([...mem[s].keys()]) : run(s, 'readonly', (st) => st.getAllKeys())),
+      // troca o conteúdo de várias listas de uma vez só: ou tudo muda, ou nada muda
+      replaceAll: (map) => {
+        const names = Object.keys(map);
+        if (mem) { for (const s of names) { mem[s].clear(); for (const v of map[s]) mem[s].set(keyOf(s, v), v); } return Promise.resolve(); }
+        return new Promise((res, rej) => {
+          const t = db.transaction(names, 'readwrite');
+          for (const s of names) { const st = t.objectStore(s); st.clear(); for (const v of map[s]) st.put(v); }
+          t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error('a troca foi interrompida'));
+        });
+      },
     };
   })();
 
   // ================= estado =================
-  const DEFAULT_SETTINGS = { k: 'settings', alertDias: 90, feriados: '31/08', pinHash: null, pinSalt: null, lastBackup: null, seq: 0, hospRepasse: null, termsVersion: 0, installHidden: false, tema: 'ameixa', nome: '', grupo: '' };
+  const DEFAULT_SETTINGS = { k: 'settings', alertDias: 90, feriados: '31/08', pinHash: null, pinSalt: null, lastBackup: null, seq: 0, hospRepasse: null, termsVersion: 0, installHidden: false, tema: 'ameixa', nome: '', grupo: '', dataVersion: 0 };
   const S = {
     records: [], terms: [], repasses: [], loose: [], ignored: new Set(), settings: { ...DEFAULT_SETTINGS },
     index: null, refs: null, hol: [], checks: [], tab: 'inicio', demo: false, storage: 'idb',
@@ -146,13 +177,36 @@
     S.records = records; S.repasses = repasses; S.loose = loose; S.ignored = new Set(ignored.map((x) => x.key));
     S.settings = { ...DEFAULT_SETTINGS, ...(meta.find((m) => m.k === 'settings') || {}) };
     S.terms = terms;
-    if ((S.settings.termsVersion || 0) < TERMS_VERSION) {
+    const er = meta.find((m) => m.k === 'erros'); if (er && Array.isArray(er.lista)) ERROS.splice(0, ERROS.length, ...er.lista.slice(-20));
+    await migrate();
+    applyTheme(); derive();
+  }
+  // ================= versão dos dados =================
+  // Cada mudança no formato salvo entra aqui como uma migração numerada, feita uma vez só e na ordem.
+  // A versão viaja junto no backup: restaurar um backup antigo roda as migrações que faltam.
+  // 'copia' = listas guardadas antes de mexer (em Ajustes > Copiar diagnóstico aparece que a cópia existe).
+  const MIGRATIONS = [
+    { v: 1, nome: 'nomes e abreviações padrão', async run() {
+      if ((S.settings.termsVersion || 0) >= TERMS_VERSION) return;
       const have = new Set(S.terms.map((t) => t.type + '|' + t.name));
       const add = C.defaultTerms().filter((t) => !have.has(t.type + '|' + t.name));
       S.terms.push(...add); await Store.putMany('terms', add);
-      S.settings.termsVersion = TERMS_VERSION; await saveSettings();
+      S.settings.termsVersion = TERMS_VERSION;
+    } },
+  ];
+  const DATA_VERSION = MIGRATIONS[MIGRATIONS.length - 1].v;
+  async function migrate() {
+    let v = S.settings.dataVersion || 0;
+    if (v > DATA_VERSION) { S.dadosNovos = true; return; } // dados de uma versão mais nova do app: não mexe em nada
+    for (const m of MIGRATIONS) {
+      if (m.v <= v) continue;
+      if (m.copia) {
+        const copia = {}; for (const st of m.copia) copia[st] = await Store.all(st);
+        await Store.put('meta', { k: 'copia-migracao-' + m.v, em: new Date().toISOString(), dados: copia });
+      }
+      await m.run();
+      v = m.v; S.settings.dataVersion = v; await saveSettings();
     }
-    applyTheme(); derive();
   }
   function derive() {
     S.index = C.buildIndex(S.terms);
@@ -417,7 +471,8 @@
     const view = { inicio: viewInicio, lista: viewLista, relatorios: viewRelatorios, ajustes: viewAjustes }[S.tab];
     // a tabela ganha uma coluna mais larga no computador e no iPhone deitado
     document.documentElement.classList.toggle('wide', S.tab === 'relatorios' && S.relTab === 'tabela');
-    $('#main').replaceChildren(...[].concat(view()));
+    const faixa = TESTE ? tip('Modo de teste', ' Estes dados ficam num banco separado do app de verdade.', 'Sair do modo de teste', () => { location.href = location.pathname; }, 'alert', 'warn') : null;
+    $('#main').replaceChildren(...[faixa, ...[].concat(view())].filter(Boolean));
     // o filtro escolhido sempre fica à vista na fileira de opções
     for (const on of document.querySelectorAll('#main .chips [aria-pressed="true"]')) {
       const row = on.parentElement; const l = on.offsetLeft - row.offsetLeft, r = l + on.offsetWidth;
@@ -437,7 +492,7 @@
   function viewInicio() {
     const out = [];
     if (!PREVIEW && S.storage === 'memory') out.push(tip('Os dados não estão sendo salvos', ' Abra o app pelo ícone na tela de início.', null, null, 'alert', 'warn'));
-    else if (!PREVIEW && !isStandalone() && !S.settings.installHidden) out.push(tip('Instale na tela de início', ' No Safari, toque em Compartilhar e depois em Adicionar à Tela de Início.', 'Ver como', () => sheetInstall(), 'phone'));
+    else if (!PREVIEW && !TESTE && !isStandalone() && !S.settings.installHidden) out.push(tip('Instale na tela de início', ' No Safari, toque em Compartilhar e depois em Adicionar à Tela de Início.', 'Ver como', () => sheetInstall(), 'phone'));
     if (!S.records.length && !S.loose.length) { out.push(welcome()); return out; }
     const m = metrics();
     const strip = h('span', { class: 'strip' }, h('span', null, 'Recebido em ' + MES_LONGO[+today().slice(5, 7) - 1]), h('b', null, brl0(m.recMes)));
@@ -719,11 +774,11 @@
     const sec = (title, kids) => h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, title)), h('div', { class: 'group' }, kids));
     const out = [];
     if (backupDue()) out.push(tip(S.settings.lastBackup ? 'Hora de fazer um backup' : 'Faça seu primeiro backup', ' Os dados ficam só neste iPhone. Guarde uma cópia no iCloud Drive.', 'Fazer backup agora', () => exportBackup(), 'share', 'warn'));
-    if (PREVIEW || !isStandalone()) out.push(h('div', { class: 'group' }, rowBtn('phone', '', 'Instalar no iPhone', PREVIEW ? 'Para usar no dia a dia, com as suas cirurgias' : 'Para abrir pelo ícone, sem internet', () => sheetInstall())));
+    if (PREVIEW || (!TESTE && !isStandalone())) out.push(h('div', { class: 'group' }, rowBtn('phone', '', 'Instalar no iPhone', PREVIEW ? 'Para usar no dia a dia, com as suas cirurgias' : 'Para abrir pelo ícone, sem internet', () => sheetInstall())));
     out.push(sec('Cor do app', [h('div', { class: 'swatches', role: 'group', 'aria-label': 'Cor do app' }, TEMAS.map(([k, l, c]) => h('button', { class: 'swatch', type: 'button', 'aria-pressed': String((S.settings.tema || 'ameixa') === k), onclick: async () => { S.settings.tema = k; applyTheme(); await saveSettings(); render(); } }, h('i', { style: `background:${c}` }), l)))]));
     out.push(sec('Seus dados', [
       rowBtn('share', 'ok', 'Fazer backup', S.settings.lastBackup ? 'O último foi em ' + ddmmyyyy(S.settings.lastBackup) : 'Você ainda não fez nenhum', () => exportBackup()),
-      rowBtn('undo', 'plain', 'Restaurar um backup', 'Troca os dados deste iPhone pelos do backup', () => pickFile()),
+      rowBtn('undo', 'plain', 'Restaurar um backup', 'Troca os dados deste iPhone pelos do backup. Se ele tiver partes, escolha todas juntas.', () => pickBackup()),
       rowBtn('sheet', 'plain', 'Exportar planilha', 'Para abrir no Excel ou no Numbers', () => exportCSV())]));
     out.push(sec('Organização', [
       rowBtn('photo', '', 'Fotos para organizar', plural(S.loose.length, 'foto', 'fotos'), () => sheetLoose()),
@@ -742,12 +797,13 @@
       rowBtn('lock', 'warn', 'Senha para abrir', S.settings.pinHash ? 'Ligada' : 'Desligada', () => sheetPin())]));
     out.push(h('div', { class: 'group' },
       h('div', { class: 'rowbtn' }, h('span', { class: 'bubble plain' }, icon('info')), h('span', { class: 't' }, 'Versão ' + VERSION, h('small', { id: 'storage-info' }, PREVIEW ? 'Prévia com cirurgias de exemplo. Nada fica salvo aqui.' : S.storage === 'memory' ? 'Nada está sendo salvo' : 'Os dados ficam só neste aparelho'))),
-      h('button', { class: 'rowbtn danger', type: 'button', onclick: () => wipeAll() }, h('span', { class: 'bubble danger' }, icon('trash')), h('span', { class: 't' }, 'Apagar todos os dados'))));
+      rowBtn('info', 'plain', 'Copiar diagnóstico', 'Para mandar quando algo der errado. Não leva dados das cirurgias.', () => sheetDiagnostico()),
+      h('button', { class: 'rowbtn danger', type: 'button', onclick: () => wipeAll() }, h('span', { class: 'bubble danger' }, icon('trash')), h('span', { class: 't' }, TESTE ? 'Apagar os dados de teste' : 'Apagar todos os dados'))));
     if (navigator.storage && navigator.storage.estimate && S.storage !== 'memory') navigator.storage.estimate().then((e) => { const el = $('#storage-info'); if (el && e.usage) el.textContent = `Os dados ficam só neste aparelho (${(e.usage / 1048576).toFixed(1).replace('.', ',')} MB)`; }).catch(() => {});
     return out;
   }
   async function wipeAll() {
-    if (!(await confirmDialog({ title: 'Apagar todos os dados?', text: 'Saem do app as cirurgias, as fotos, os nomes e as planilhas. Se quiser guardar uma cópia, faça um backup antes.', ok: 'Continuar', danger: true }))) return;
+    if (!(await confirmDialog({ title: TESTE ? 'Apagar os dados de teste?' : 'Apagar todos os dados?', text: TESTE ? 'Saem só os dados do modo de teste. O app de verdade não muda.' : 'Saem do app as cirurgias, as fotos, os nomes e as planilhas. Se quiser guardar uma cópia, faça um backup antes.', ok: 'Continuar', danger: true }))) return;
     if (!(await confirmDialog({ title: 'Tem certeza?', text: 'Não dá para desfazer.', ok: 'Apagar tudo', danger: true }))) return;
     for (const s of STORES) await Store.clear(s);
     urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear();
@@ -1141,10 +1197,10 @@
 
   // ================= importação =================
   function pickFile() {
-    const inp = $('#file-in'); inp.value = '';
+    const inp = $('#file-in'); inp.value = ''; inp.multiple = false;
     inp.onchange = async () => {
       const f = inp.files && inp.files[0]; if (!f) return;
-      try { await routeFile(f); } catch (e) { console.error(e); await confirmDialog({ title: 'Não deu para abrir', text: (e && e.message) || String(e), ok: 'Entendi', cancel: false }); }
+      try { await routeFile(f); } catch (e) { console.error(e); anotaErro(e && e.message, 'abrir arquivo'); await confirmDialog({ title: 'Não deu para abrir', text: (e && e.message) || String(e), ok: 'Entendi', cancel: false }); }
     };
     inp.click();
   }
@@ -1158,12 +1214,12 @@
     try { zip = await C.zipOpen(file); } catch (e) { zip = null; }
     if (zip) {
       if (zip.entries.some((e) => e.name === 'xl/workbook.xml')) return flowRepasse(file);
-      if (zip.entries.some((e) => e.base === 'dados.json')) return flowRestore(file, zip);
+      if (zip.entries.some((e) => e.name === 'dados.json' || e.name === 'backup.json')) return flowRestore([file]);
       if (zip.entries.some((e) => /\.txt$/i.test(e.base))) return flowWhatsApp(file, zip);
       throw new Error('Esse arquivo não é a conversa do WhatsApp, uma planilha de repasse nem um backup do app.');
     }
     const head = await file.slice(0, 4000).text();
-    if (/^\s*\{/.test(head)) return flowRestore(file, null);
+    if (/^\s*\{/.test(head)) return flowRestore([file]);
     if (/\[\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4},? \d{1,2}:\d{2} - /.test(head)) return flowWhatsApp(file, null);
     throw new Error('Esse arquivo não é a conversa do WhatsApp, uma planilha de repasse nem um backup do app.');
   }
@@ -1248,7 +1304,8 @@
       if (st.step === 'importando') return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('photo')), h('p', { id: 'imp-lab' }, 'Guardando…'), h('div', { class: 'progress', style: 'width:100%' }, h('span', { id: 'imp-bar' })))] };
       const dn = st.done;
       const extras = [dn.loose ? plural(dn.loose, 'foto para organizar', 'fotos para organizar') : null, dn.rev ? plural(dn.rev, 'para completar', 'para completar') : null, dn.fill ? `fotos em ${plural(dn.fill, 'cirurgia', 'cirurgias')} que já estavam no app` : null, dn.err ? `${dn.err} fotos não puderam ser lidas` : null].filter(Boolean);
-      return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${plural(dn.recs, 'cirurgia nova', 'cirurgias novas')} no app.`), extras.length ? h('p', null, cap(extras.join(', ')) + '.') : null)],
+      return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${plural(dn.recs, 'cirurgia nova', 'cirurgias novas')} no app.`), extras.length ? h('p', null, cap(extras.join(', ')) + '.') : null),
+        !PREVIEW && (dn.recs || dn.loose) ? tip('Faça um backup agora', ' Depois do backup, o arquivo da conversa que você salvou em Arquivos já pode ser apagado do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null],
         foot: [dn.loose ? h('button', { class: 'btn', type: 'button', onclick: () => { api.close(true); sheetLoose(); } }, 'Organizar fotos') : null, h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', {}); } }, 'Ver cirurgias')] };
     } });
     async function runImport(api) {
@@ -1316,7 +1373,8 @@
       }
       if (st.step === 'pronto') {
         return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${brl(rep.total)} registrados.`),
-          h('p', null, cap([st.res.matched ? `${plural(st.res.matched, 'cirurgia do WhatsApp ficou paga', 'cirurgias do WhatsApp ficaram pagas')}` : null, st.res.created ? `${plural(st.res.created, 'cirurgia nova', 'cirurgias novas')}, que não estavam no WhatsApp` : null].filter(Boolean).join(' e ')) + '.'))],
+          h('p', null, cap([st.res.matched ? `${plural(st.res.matched, 'cirurgia do WhatsApp ficou paga', 'cirurgias do WhatsApp ficaram pagas')}` : null, st.res.created ? `${plural(st.res.created, 'cirurgia nova', 'cirurgias novas')}, que não estavam no WhatsApp` : null].filter(Boolean).join(' e ')) + '.')),
+          !PREVIEW ? tip('Faça um backup agora', ' Assim os pagamentos desta planilha ficam guardados fora do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null],
           foot: h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', { status: 'recebido' }); } }, 'Ver cirurgias pagas') };
       }
       const matched = acts.filter((a) => a.recordId && !st.unlink.has(a.recordId));
@@ -1395,57 +1453,194 @@
   }
 
   // ---- backup ----
-  async function flowRestore(file, zip) {
-    let data;
-    try {
-      if (zip) { const e = zip.entries.find((x) => x.base === 'dados.json'); data = JSON.parse(await (await C.zipEntryBlob(zip, e)).text()); }
-      else data = JSON.parse(await file.text());
-    } catch (e) { throw new Error('Não consegui ler esse backup.'); }
-    if (!data || data.app !== 'registro-cirurgias') throw new Error('Esse arquivo não é um backup do app.');
-    const ok = await confirmDialog({ title: 'Restaurar o backup?', text: `Backup de ${data.exportadoEm ? ddmmyyyy(data.exportadoEm.slice(0, 10)) : 'data desconhecida'}, com ${plural((data.records || []).length, 'cirurgia', 'cirurgias')}. O que está neste iPhone agora será trocado por ele.`, ok: 'Restaurar', danger: true });
-    if (!ok) return;
-    const b = busy('Restaurando…');
-    try {
-      const keepPin = { pinHash: S.settings.pinHash, pinSalt: S.settings.pinSalt };
-      for (const s of STORES) await Store.clear(s);
-      urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear();
-      await Store.putMany('records', data.records || []);
-      await Store.putMany('terms', data.terms || []);
-      await Store.putMany('repasses', data.repasses || []);
-      await Store.putMany('loose', data.loose || []);
-      await Store.putMany('ignored', (data.ignored || []).map((key) => ({ key })));
-      await Store.put('meta', { ...DEFAULT_SETTINGS, ...(data.settings || {}), ...keepPin, k: 'settings' });
-      if (zip) {
-        const fotos = zip.entries.filter((e) => /^fotos\/[^/]+$/.test(e.name) && !/\.t\.[a-z]+$/i.test(e.name));
-        let i = 0;
-        for (const e of fotos) {
-          const id = e.base.replace(/\.[a-z0-9]+$/i, '');
-          const buf = await (await C.zipEntryBlob(zip, e)).arrayBuffer();
-          const te = zip.entries.find((x) => x.name.startsWith('fotos/' + id + '.t.'));
-          const tbuf = te ? await (await C.zipEntryBlob(zip, te)).arrayBuffer() : null;
-          await Store.put('photos', { id, name: e.base, type: extType(e.base), buf, tbuf });
-          b.set(++i / fotos.length, `Restaurando fotos: ${i} de ${fotos.length}`);
-        }
-      }
-      S.demo = false; await load(); persistStorage();
-    } finally { b.done(); }
-    for (const s of sheets.slice()) s.close(true);
-    go('inicio'); toast('Backup restaurado.');
-  }
+  // O backup sai em partes de até 40 MB, montadas uma de cada vez: nunca carrega todas as fotos juntas.
+  // A parte 1 leva os dados (dados.json); toda parte leva um backup.json dizendo de qual backup ela é.
+  // Com uma parte só, o arquivo tem o mesmo formato das versões antigas.
+  const PARTE_BYTES = 40 * 1048576;
   const typeExt = (t) => ({ 'image/png': 'png', 'image/heic': 'heic', 'image/webp': 'webp', 'image/gif': 'gif' }[t] || 'jpg');
+  const mb = (b) => (b < 52429 ? 'menos de 0,1 MB' : `${(b / 1048576).toFixed(1).replace('.', ',')} MB`);
+  const fotosUsadas = (records, loose) => new Set([...(records || []).flatMap((r) => r.photoIds || []), ...(loose || []).map((l) => l.photoId)].filter(Boolean));
+  async function planejarBackup() {
+    const usadas = fotosUsadas(S.records, S.loose);
+    const fotos = [];
+    for (const id of await Store.keys('photos')) {   // uma foto por vez, só para saber o tamanho
+      if (!usadas.has(id)) continue;
+      const p = await Store.get('photos', id);
+      if (p) fotos.push({ id, bytes: (p.buf ? p.buf.byteLength : 0) + (p.tbuf ? p.tbuf.byteLength : 0) });
+    }
+    const limite = S.parteBytes || PARTE_BYTES;
+    const partes = [[]]; let soma = 0;
+    for (const f of fotos) {
+      if (soma + f.bytes > limite && partes[partes.length - 1].length) { partes.push([]); soma = 0; }
+      partes[partes.length - 1].push(f.id); soma += f.bytes;
+    }
+    return { id: C.uid('b'), em: new Date().toISOString(), dia: today(), partes, total: fotos.reduce((s, f) => s + f.bytes, 0), nFotos: fotos.length };
+  }
+  function dadosBackup(plano) {
+    return { app: 'registro-cirurgias', versao: 2, exportadoEm: plano.em, backupId: plano.id, partes: plano.partes.length, fotos: plano.nFotos,
+      records: S.records, terms: S.terms, repasses: S.repasses, loose: S.loose, ignored: [...S.ignored],
+      settings: { ...S.settings, lastBackup: plano.dia, pinHash: null, pinSalt: null } };
+  }
+  async function montarParte(plano, i) {
+    const P = plano.partes.length;
+    const files = [{ name: 'backup.json', data: JSON.stringify({ app: 'registro-cirurgias', versao: 2, backupId: plano.id, parte: i + 1, partes: P, exportadoEm: plano.em, fotos: plano.partes[i] }) }];
+    if (i === 0) files.push({ name: 'dados.json', data: JSON.stringify(dadosBackup(plano)) });
+    for (const id of plano.partes[i]) {
+      const p = await Store.get('photos', id); if (!p) continue;
+      files.push({ name: `fotos/${p.id}.${typeExt(p.type)}`, data: new Uint8Array(p.buf) });
+      if (p.tbuf) files.push({ name: `fotos/${p.id}.t.jpg`, data: new Uint8Array(p.tbuf) });
+    }
+    return C.zipWrite(files);
+  }
   async function exportBackup() {
     if (PREVIEW) { await confirmDialog({ title: 'Backup só no app instalado', text: 'Nesta prévia nada fica salvo. Depois de instalar, este botão gera um arquivo com tudo para você guardar em Arquivos.', ok: 'Entendi', cancel: false }); return; }
     const b = busy('Preparando o backup…');
-    let blob;
+    let plano;
+    try { plano = await planejarBackup(); }
+    catch (e) { b.done(); anotaErro(e && e.message, 'backup'); await confirmDialog({ title: 'Não deu para preparar o backup', text: (e && e.message) || String(e), ok: 'Entendi', cancel: false }); return; }
+    b.done();
+    sheetBackup(plano);
+  }
+  function sheetBackup(plano) {
+    const P = plano.partes.length;
+    const st = { i: 0, blob: null, salvas: 0, preparando: false, erro: null };
+    const nome = (k) => (P === 1 ? `cirurgias-backup-${plano.dia}.zip` : `cirurgias-backup-${plano.dia}-parte-${k}-de-${P}.zip`);
+    let api = null;
+    async function preparar() {   // monta só a parte da vez; a anterior já foi salva e sai da memória
+      st.preparando = true; st.erro = null; if (api) api.update();
+      try { st.blob = await montarParte(plano, st.i); } catch (e) { st.erro = (e && e.message) || String(e); anotaErro(st.erro, 'backup'); }
+      st.preparando = false; if (api) api.update();
+    }
+    api = openSheet({ title: 'Backup',
+      beforeClose: async () => st.salvas === 0 || st.salvas === P || confirmDialog({ title: 'Parar o backup?', text: `${P - st.salvas === 1 ? 'Falta 1 parte' : `Faltam ${P - st.salvas} partes`}. O backup só vale com todas.`, ok: 'Parar', danger: true }),
+      render() {
+        const fim = st.salvas === P;
+        const linhas = plano.partes.map((ids, i) => {
+          const [tom, txt] = i < st.salvas ? ['ok', 'Salva'] : i === st.i ? (st.preparando ? ['plain', 'Preparando…'] : st.erro ? ['danger', 'Deu erro'] : ['accent', 'Pronta']) : ['plain', 'Na fila'];
+          return h('div', { class: 'rowbtn' }, h('span', { class: 'bubble ' + (i < st.salvas ? 'ok' : 'plain') }, icon(i < st.salvas ? 'check' : 'folder')),
+            h('span', { class: 't' }, P === 1 ? 'Arquivo do backup' : `Parte ${i + 1} de ${P}`, h('small', null, plural(ids.length, 'foto', 'fotos') + (i === 0 ? ' e os dados' : ''))),
+            h('span', { class: 'st ' + tom }, txt));
+        });
+        const texto = fim ? (P === 1 ? 'Guarde o arquivo no iCloud Drive para ter uma cópia fora do iPhone.' : `As ${P} partes foram salvas. Para restaurar, escolha as ${P} juntas.`)
+          : `${plural(S.records.length, 'cirurgia', 'cirurgias')} e ${plural(plano.nFotos, 'foto', 'fotos')}, ${mb(plano.total)}. ` +
+            (P === 1 ? 'Salve em Arquivos, de preferência no iCloud Drive.' : `Vai em ${P} partes: salve todas na mesma pasta, de preferência no iCloud Drive.`);
+        const body = [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon(fim ? 'check' : 'folder')), h('h2', null, fim ? 'Backup completo' : 'Backup pronto para salvar'), h('p', null, texto)),
+          h('div', { class: 'group' }, linhas)];
+        if (st.erro) body.push(tip('Não deu para preparar esta parte', ' ' + st.erro, 'Tentar de novo', () => preparar(), 'alert', 'warn'));
+        const foot = fim ? h('button', { class: 'btn primary', type: 'button', onclick: () => api.close(true) }, 'Concluir')
+          : h('button', { class: 'btn primary', type: 'button', 'data-act': 'salvar-parte', disabled: !st.blob || st.preparando, onclick: () => {
+            compartilhar(st.blob, nome(st.i + 1), 'application/zip').then(async (ok) => {
+              if (!ok) return;
+              st.salvas++; st.blob = null; st.i++;
+              if (st.i < P) { preparar(); return; }
+              S.settings.lastBackup = plano.dia; await saveSettings(); render();
+              if (P === 1) { api.close(true); toast('Backup salvo. Confira se ficou em Arquivos.'); }   // uma parte só: igual a antes
+              else { api.update(); toast(`Backup completo: ${P} partes salvas.`); }
+            });
+          } }, icon('share'), P === 1 ? 'Salvar em Arquivos' : `Salvar a parte ${Math.min(st.i + 1, P)} de ${P}`);
+        return { body, foot };
+      } });
+    preparar();
+  }
+
+  // ---- restaurar ----
+  // Primeiro confere tudo sem mexer em nada: as partes, as fotos, se algum arquivo está danificado e o espaço livre.
+  // Depois guarda as fotos que faltam e troca os dados de uma vez só: se algo falhar no caminho, nada muda.
+  function pickBackup() {
+    const inp = $('#file-in'); inp.value = ''; inp.multiple = true;
+    inp.onchange = async () => {
+      const fs = [...(inp.files || [])]; inp.multiple = false; if (!fs.length) return;
+      try { await flowRestore(fs); } catch (e) { anotaErro(e && e.message, 'restaurar'); await confirmDialog({ title: 'Não deu para restaurar', text: (e && e.message) || String(e), ok: 'Entendi', cancel: false }); }
+    };
+    inp.click();
+  }
+  async function flowRestore(files) {
+    files = [].concat(files);
+    const b = busy('Conferindo o backup…');
+    let pk;
+    try { pk = await lerBackup(files, (i, n) => b.set(i / n, `Conferindo as fotos: ${i} de ${n}`)); } finally { b.done(); }
+    const d = pk.data;
+    const ok = await confirmDialog({ title: 'Restaurar o backup?', text: `Backup de ${d.exportadoEm ? ddmmyyyy(d.exportadoEm.slice(0, 10)) : 'data desconhecida'}, com ${plural((d.records || []).length, 'cirurgia', 'cirurgias')} e ${plural(pk.usadas.size, 'foto', 'fotos')}${pk.P > 1 ? `, em ${pk.P} partes` : ''}. O app já conferiu tudo. O que está neste iPhone agora será trocado por ele.`, ok: 'Restaurar', danger: true });
+    if (!ok) return;
+    await restaurar(pk);
+  }
+  async function lerJson(z, nome) {
+    const e = z.entries.find((x) => x.name === nome); if (!e) return null;
+    try { return JSON.parse(await (await C.zipEntryChecked(z, e)).text()); } catch (x) { throw new Error('O arquivo de dados do backup está danificado.'); }
+  }
+  async function lerBackup(files, progresso) {
+    const arq = [];
+    for (const f of files) {
+      let z = null; try { z = await C.zipOpen(f); } catch (e) { z = null; }
+      if (!z) {   // backup bem antigo, em .json e sem fotos
+        if (files.length === 1 && /^\s*\{/.test(await f.slice(0, 200).text())) {
+          let data; try { data = JSON.parse(await f.text()); } catch (e) { throw new Error('Não consegui ler esse backup.'); }
+          if (!data || data.app !== 'registro-cirurgias') throw new Error('Esse arquivo não é um backup do app.');
+          return { data, fotos: new Map(), usadas: new Set(), P: 1, bytes: 0 };
+        }
+        throw new Error(`O arquivo ${f.name} não é um backup do app.`);
+      }
+      arq.push({ z, info: await lerJson(z, 'backup.json'), temDados: z.entries.some((e) => e.name === 'dados.json') });
+    }
+    const principais = arq.filter((x) => x.temDados);
+    if (!principais.length) throw new Error(arq.length > 1 ? 'Falta a parte 1 do backup, a que tem os dados.' : 'Este arquivo é só uma parte do backup. Toque em Restaurar e escolha todas as partes juntas.');
+    if (principais.length > 1) throw new Error('Esses arquivos são de backups diferentes. Escolha as partes de um backup só.');
+    const data = await lerJson(principais[0].z, 'dados.json');
+    if (!data || data.app !== 'registro-cirurgias') throw new Error('Esse arquivo não é um backup do app.');
+    const P = data.partes || 1;
+    const partes = data.backupId ? arq.filter((x) => x.info && x.info.backupId === data.backupId) : [principais[0]];
+    if (partes.length !== arq.length) throw new Error('Há arquivos de outro backup na escolha. Escolha só as partes de um backup.');
+    const tem = new Set(partes.map((x) => (x.info ? x.info.parte : 1)));
+    const faltam = []; for (let k = 1; k <= P; k++) if (!tem.has(k)) faltam.push(k);
+    if (faltam.length) throw new Error(`${faltam.length === 1 ? 'Falta a parte' : 'Faltam as partes'} ${faltam.join(', ')} de ${P}. Toque em Restaurar e escolha todas as partes juntas.`);
+    const fotos = new Map();
+    for (const x of partes) for (const e of x.z.entries) {
+      const m = e.name.match(/^fotos\/([^/]+?)(\.t)?\.[a-z0-9]+$/i); if (!m) continue;
+      const o = fotos.get(m[1]) || { z: x.z }; if (m[2]) o.te = e; else o.e = e; fotos.set(m[1], o);
+    }
+    const usadas = fotosUsadas(data.records, data.loose);
+    const sumidas = [...usadas].filter((id) => !(fotos.get(id) || {}).e);
+    if (sumidas.length) throw new Error(`O backup está incompleto: ${plural(sumidas.length, 'foto não está', 'fotos não estão')} nos arquivos escolhidos.`);
+    // confere cada foto agora, uma por vez, para avisar antes de pedir a confirmação
+    let i = 0;
+    for (const id of usadas) { const o = fotos.get(id); await C.zipEntryChecked(o.z, o.e); if (o.te) await C.zipEntryChecked(o.z, o.te); if (progresso) progresso(++i, usadas.size); }
+    const bytes = [...usadas].reduce((s, id) => { const o = fotos.get(id); return s + o.e.usize + (o.te ? o.te.usize : 0); }, 0);
+    let est = null; try { if (navigator.storage && navigator.storage.estimate) est = await navigator.storage.estimate(); } catch (e) { est = null; }
+    if (est && est.quota && est.usage != null && est.quota - est.usage < bytes * 1.2) throw new Error(`Falta espaço no iPhone para restaurar: o backup tem ${mb(bytes)} de fotos.`);
+    return { data, fotos, usadas, P, bytes };
+  }
+  async function restaurar(pk) {
+    const d = pk.data;
+    const b = busy('Restaurando…');
+    const novas = [];
     try {
-      const data = { app: 'registro-cirurgias', versao: 1, exportadoEm: new Date().toISOString(), records: S.records, terms: S.terms, repasses: S.repasses, loose: S.loose, ignored: [...S.ignored], settings: { ...S.settings, lastBackup: today(), pinHash: null, pinSalt: null } };
-      const files = [{ name: 'dados.json', data: JSON.stringify(data) }];
-      const photos = await Store.all('photos');
-      for (const p of photos) { files.push({ name: `fotos/${p.id}.${typeExt(p.type)}`, data: new Uint8Array(p.buf) }); if (p.tbuf) files.push({ name: `fotos/${p.id}.t.jpg`, data: new Uint8Array(p.tbuf) }); }
-      blob = await C.zipWrite(files);
-    } finally { b.done(); }
-    const ok = await offerFile(blob, `cirurgias-backup-${today()}.zip`, 'application/zip', 'Backup pronto', `${plural(S.records.length, 'cirurgia', 'cirurgias')} e as fotos, ${(blob.size / 1048576).toFixed(1).replace('.', ',')} MB. Salve em Arquivos, de preferência no iCloud Drive, para ter uma cópia fora do iPhone.`);
-    if (ok) { S.settings.lastBackup = today(); await saveSettings(); render(); }
+      const antes = new Set(await Store.keys('photos'));
+      const lista = [...pk.usadas]; let i = 0;
+      for (const id of lista) {
+        if (!antes.has(id)) {   // a mesma foto que já está no iPhone não é gravada de novo
+          const o = pk.fotos.get(id);
+          const buf = await (await C.zipEntryChecked(o.z, o.e)).arrayBuffer();
+          const tbuf = o.te ? await (await C.zipEntryChecked(o.z, o.te)).arrayBuffer() : null;
+          await Store.put('photos', { id, name: o.e.base, type: extType(o.e.base), buf, tbuf });
+          novas.push(id);
+        }
+        b.set(++i / Math.max(1, lista.length), `Conferindo e guardando as fotos: ${i} de ${lista.length}`);
+      }
+      b.set(1, 'Trocando os dados…');
+      const keepPin = { pinHash: S.settings.pinHash, pinSalt: S.settings.pinSalt };
+      await Store.replaceAll({ records: d.records || [], terms: d.terms || [], repasses: d.repasses || [], loose: d.loose || [],
+        ignored: (d.ignored || []).map((key) => ({ key })), meta: [{ ...DEFAULT_SETTINGS, ...(d.settings || {}), ...keepPin, k: 'settings' }] });
+    } catch (e) {
+      for (const id of novas) { try { await Store.del('photos', id); } catch (x) { /* fica para a próxima limpeza */ } }
+      b.done(); anotaErro(e && e.message, 'restaurar');
+      throw new Error('Nada foi mudado neste iPhone. ' + ((e && e.message) || ''));
+    }
+    try { for (const id of await Store.keys('photos')) if (!pk.usadas.has(id)) await deletePhotos([id]); } catch (e) { anotaErro(e && e.message, 'limpar fotos'); }
+    urlCache.forEach((u) => URL.revokeObjectURL(u)); urlCache.clear();
+    S.demo = false; await load(); persistStorage();
+    b.done();
+    for (const s of sheets.slice()) s.close(true);
+    go('inicio'); toast('Backup restaurado.');
   }
   function csvCell(v) { const s = v == null ? '' : String(v); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   async function exportCSV() {
@@ -1460,22 +1655,68 @@
     const text = '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
     await offerFile(new Blob([text], { type: 'text/csv;charset=utf-8' }), `cirurgias-${today()}.csv`, 'text/csv', 'Planilha pronta', `${plural(rows.length, 'cirurgia', 'cirurgias')}. Abre no Excel, no Numbers e no Google Planilhas.`);
   }
+  // abre a folha do iPhone para salvar em Arquivos; no computador, baixa o arquivo. Tem de ser chamada direto no toque.
+  async function compartilhar(blob, name, type) {
+    let f = new File([blob], name, { type });
+    try {
+      if (navigator.canShare && !navigator.canShare({ files: [f] })) { const alt = new File([blob], name, { type: 'application/octet-stream' }); if (navigator.canShare({ files: [alt] })) f = alt; }
+      if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: name });
+      else { const u = URL.createObjectURL(blob); const a = h('a', { href: u, download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 4000); }
+      return true;
+    } catch (e) { if (e && e.name !== 'AbortError') { toast('Não deu para salvar: ' + e.message); anotaErro(e.message, 'salvar arquivo'); } return false; }
+  }
   function offerFile(blob, name, type, title, text) {
     return new Promise((res) => {
       let done = false;
       const api = openSheet({ title, onClose: () => { if (!done) res(false); }, render() {
         return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('folder')), h('h2', null, title), h('p', null, text))],
-          foot: h('button', { class: 'btn primary', type: 'button', onclick: async () => {
-            let f = new File([blob], name, { type });
-            try {
-              if (navigator.canShare && !navigator.canShare({ files: [f] })) { const alt = new File([blob], name, { type: 'application/octet-stream' }); if (navigator.canShare({ files: [alt] })) f = alt; }
-              if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f], title: name });
-              else { const u = URL.createObjectURL(blob); const a = h('a', { href: u, download: name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 4000); }
-              done = true; res(true); api.close(true); toast('Arquivo pronto. Confira se salvou em Arquivos.');
-            } catch (e) { if (e && e.name !== 'AbortError') toast('Não deu para salvar: ' + e.message); }
+          foot: h('button', { class: 'btn primary', type: 'button', onclick: () => {
+            compartilhar(blob, name, type).then((ok) => { if (ok) { done = true; res(true); api.close(true); toast('Arquivo pronto. Confira se salvou em Arquivos.'); } });
           } }, icon('share'), 'Salvar em Arquivos') };
       } });
     });
+  }
+
+  // ================= diagnóstico =================
+  // Texto para mandar quando algo der errado: versão, contagens e erros recentes. Nenhuma cirurgia, nome, valor ou foto.
+  async function textoDiagnostico() {
+    const n = (f) => S.records.filter(f).length;
+    const onde = PREVIEW ? 'prévia do Claude' : TESTE ? 'modo de teste (banco separado)' : isStandalone() ? 'app instalado na Tela de Início' : 'navegador';
+    let espaco = 'espaço não informado';
+    try { if (navigator.storage && navigator.storage.estimate) { const e = await navigator.storage.estimate(); if (e.usage != null) espaco = `${mb(e.usage)} usados${e.quota ? ` de ${mb(e.quota)}` : ''}`; } } catch (e) { /* sem estimativa */ }
+    let sw = 'desligado';
+    try { if (navigator.serviceWorker && navigator.serviceWorker.controller) sw = 'ligado'; if (window.caches) { const ks = await caches.keys(); if (ks.length) sw += ` (${ks.join(', ')})`; } } catch (e) { /* sem cache */ }
+    let nFotos = '?'; try { nFotos = (await Store.keys('photos')).length; } catch (e) { /* sem banco */ }
+    const quando = (iso) => { const d = new Date(iso); const z = (n) => String(n).padStart(2, '0'); return `${z(d.getDate())}/${z(d.getMonth() + 1)}/${d.getFullYear()} ${z(d.getHours())}:${z(d.getMinutes())}`; };
+    return [
+      'Controle de Cirurgias: diagnóstico',
+      `Gerado em ${quando(new Date().toISOString())}`,
+      `Versão do app ${VERSION}; versão dos dados ${S.settings.dataVersion || 0} (esperada ${DATA_VERSION})${S.dadosNovos ? '; os dados são de uma versão mais nova do app' : ''}`,
+      `Onde: ${onde}`,
+      `Armazenamento: ${S.storage === 'idb' ? 'banco do aparelho' : 'só na memória, nada é salvo'}; ${espaco}`,
+      `Cirurgias: ${S.records.length} (a receber ${n(isOpen)}, recebidas ${n((r) => r.status === 'recebido')}, sem cobrança ${n((r) => r.status === 'semcobranca')}, para completar ${n(needsReview)})`,
+      `Fotos guardadas: ${nFotos}; fotos sem legenda: ${S.loose.length}`,
+      `Nomes e abreviações: ${S.terms.length}; planilhas de repasse: ${S.repasses.length}`,
+      `Último backup: ${S.settings.lastBackup ? ddmmyyyy(S.settings.lastBackup) : 'nunca'}`,
+      `Senha para abrir: ${S.settings.pinHash ? 'ligada' : 'desligada'}`,
+      `Uso sem internet: ${sw}`,
+      `Aparelho: ${navigator.userAgent}`,
+      `Tela: ${screen.width}×${screen.height}, ${window.devicePixelRatio || 1}x`,
+      ERROS.length ? `Erros recentes (${Math.min(ERROS.length, 10)}):` : 'Erros recentes: nenhum',
+      ...ERROS.slice(-10).map((e) => `- ${quando(e.em)} ${e.onde ? e.onde + ': ' : ''}${e.msg}`),
+    ].join('\n');
+  }
+  function sheetDiagnostico() {
+    let texto = null;
+    const api = openSheet({ title: 'Diagnóstico', back: true, render() {
+      const area = h('textarea', { id: 'diag-texto', class: 'diag', rows: 14, readonly: true, 'aria-label': 'Texto do diagnóstico' }); area.value = texto || 'Preparando…';
+      return { body: [h('p', { class: 'lead' }, 'Mande este texto quando algo der errado. Ele não leva cirurgias, nomes, valores nem fotos: só contagens, a versão do app e os erros recentes.'), area],
+        foot: h('button', { class: 'btn primary', type: 'button', disabled: !texto, onclick: () => {
+          const manual = () => { const el = $('#diag-texto'); if (el) { el.focus(); el.select(); } toast('Toque e segure no texto para copiar.'); };
+          try { navigator.clipboard.writeText(texto).then(() => toast('Diagnóstico copiado. É só colar na conversa.'), manual); } catch (e) { manual(); }
+        } }, 'Copiar') };
+    } });
+    textoDiagnostico().then((t) => { texto = t; api.update(); });
   }
 
   // ================= instalar =================
@@ -1594,8 +1835,28 @@
     let rolou = false;
     window.addEventListener('scroll', () => { const s = window.scrollY > 4; if (s !== rolou) { rolou = s; document.documentElement.classList.toggle('scrolled', s); } }, { passive: true });
     if (S.settings.pinHash) await lockScreen();
-    if (!PREVIEW && 'serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname))) navigator.serviceWorker.register('sw.js').catch(() => {});
+    watchUpdates();
   }
-  window.__app = { S, go, render, routeFile, Store };
+  // ================= atualização =================
+  // O sw.js guarda o app para abrir sem internet. Se uma versão nova for publicada com o app aberto, aparece o aviso
+  // "Nova versão disponível". O app confere sempre que volta para a tela e a cada hora.
+  const swOk = () => !PREVIEW && 'serviceWorker' in navigator && (location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname));
+  function watchUpdates() {
+    if (!swOk()) return;
+    const tinha = !!navigator.serviceWorker.controller;  // na primeira instalação não há o que avisar
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (tinha) showUpdate(); });
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      const conferir = () => reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') conferir(); });
+      setInterval(conferir, 60 * 60 * 1000);
+    }).catch((e) => anotaErro(e && e.message, 'sw.js'));
+  }
+  function showUpdate() {
+    if ($('#update-bar')) return;
+    document.body.append(h('div', { class: 'updatebar', id: 'update-bar', role: 'status' },
+      h('span', { class: 't' }, h('b', null, 'Nova versão disponível'), h('small', null, 'Seus dados continuam iguais.')),
+      h('button', { class: 'btn sm', type: 'button', onclick: () => location.reload() }, 'Atualizar')));
+  }
+  window.__app = { S, go, render, routeFile, Store, VERSION, DATA_VERSION, TESTE, erros: ERROS, mostrarAviso: () => showUpdate() };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

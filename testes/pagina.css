@@ -1,0 +1,37 @@
+/* Página dos testes: o mesmo branco do app, sem nada carregado de fora. */
+:root {
+  color-scheme: light;
+  --bg: #ffffff; --fill: #f4f4f6; --line: #ebeaee; --ink: #26232b; --muted: #6f6a76;
+  --ok: #1f7a50; --ok-soft: #e7f4ec; --warn: #9a5f0c; --warn-soft: #fcf2e0; --danger: #bf3b36; --danger-soft: #fcecea; --info: #2d66b5; --info-soft: #edf3fc;
+  --font: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-ui);
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) calc(32px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+main { max-width: 680px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+header { padding-top: 18px; }
+h1 { font-family: var(--font); font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+h2 { font-family: var(--font); font-size: 18px; font-weight: 700; margin: 0 0 6px; }
+.sub { margin: 4px 0 0; color: var(--muted); }
+.resumo { border-radius: 18px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; background: var(--fill); }
+.resumo b { font-family: var(--font); font-size: 19px; }
+.resumo.verde { background: var(--ok-soft); } .resumo.verde b { color: var(--ok); }
+.resumo.vermelho { background: var(--danger-soft); } .resumo.vermelho b { color: var(--danger); }
+.resumo.azul { background: var(--info-soft); } .resumo.azul b { color: var(--info); }
+.lista { display: flex; flex-direction: column; gap: 18px; }
+.grupo ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+.grupo li { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 10px 14px; }
+.grupo li + li { border-top: 1px solid var(--line); }
+.nome { min-width: 0; overflow-wrap: anywhere; }
+.item { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.detalhe { grid-column: 2; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.pill { justify-self: start; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 8px; white-space: nowrap; margin-top: 1px; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.esperada { background: var(--warn-soft); color: var(--warn); }
+.pill.falhou { background: var(--danger-soft); color: var(--danger); }
+.pill.passou { background: var(--info-soft); color: var(--info); }
+.rodape { color: var(--muted); font-size: 13px; margin: 0; }
+details.detalhe summary { cursor: pointer; color: var(--warn); font-weight: 600; }
+details.detalhe[open] summary { margin-bottom: 4px; }

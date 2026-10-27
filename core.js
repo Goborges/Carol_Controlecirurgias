@@ -417,7 +417,7 @@
         }
         x += 4 + sz;
       }
-      if (!name.endsWith('/')) entries.push({ name, base: name.split('/').pop(), method, csize, usize, off });
+      if (!name.endsWith('/')) entries.push({ name, base: name.split('/').pop(), method, csize, usize, off, crc: c.getUint32(p + 16, true) });
       p = xend + clen;
     }
     return { blob, entries };
@@ -434,6 +434,13 @@
       return type ? new Blob([out], { type }) : out;
     }
     throw new Error('Formato de compressão não suportado no .zip.');
+  }
+  /** Como zipEntryBlob, mas confere o CRC do arquivo: se o zip estiver danificado, dá erro em vez de devolver dados errados. */
+  async function zipEntryChecked(zip, entry, type) {
+    const blob = await zipEntryBlob(zip, entry, type);
+    const u8 = new Uint8Array(await blob.arrayBuffer());
+    if (u8.length !== entry.usize || crc32(u8) !== entry.crc) throw new Error(`O arquivo ${entry.base} está danificado no backup.`);
+    return blob;
   }
   const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
   function crc32(u8) { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_TABLE[(c ^ u8[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
@@ -711,7 +718,7 @@
     norm, stripMarks, pad2, ymd, dayNum, fromDayNum, minutesOf, weekday, todayStr, median, round2, uid, capFirst, sentenceCase, levenshtein,
     easter, isHoliday, isUrgent, parseExtraHolidays, T, TYPE_LABEL, defaultTerms, buildIndex, famOf,
     parseCaption, parseChat, groupMessages, collectUnknown, recordFromEntry,
-    zipOpen, zipEntryBlob, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
+    zipOpen, zipEntryBlob, zipEntryChecked, zipWrite, crc32, readXlsx, excelDate, parseRepasse,
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
