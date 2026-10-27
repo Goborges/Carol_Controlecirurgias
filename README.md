@@ -26,6 +26,7 @@ Endereço: https://goborges.github.io/Carol_Controlecirurgias/
 - A cada versão, suba `VERSION` em `ui.js` e `CACHE` em `sw.js`, com o mesmo número.
 - Nenhum dado real neste repositório, que é público: nada de conversa exportada, fotos ou planilhas.
 - Nada vem de outro site: sem fonte, biblioteca ou serviço de fora. A regra de segurança (Content-Security-Policy) no `index.html` bloqueia qualquer conexão externa.
+- Não publique outros sites no GitHub Pages da conta Goborges. Todo site dela fica em goborges.github.io e, no navegador, enxerga os dados do app (decisão de 27/10/2026).
 - Mudança no formato salvo entra como migração numerada em `MIGRATIONS` (`ui.js`). Uma lista nova no banco sobe `DB_VERSION`; o app abre um banco mais novo que ele, para que voltar de versão nunca esconda os dados.
 
 ## Onde os dados ficam
