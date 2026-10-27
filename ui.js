@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.11';
+  const VERSION = '1.12';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -576,18 +576,45 @@
       foot.hidden = !out.foot;
     }
     drawHead(); draw();
+    arrastarParaFechar(el, head, () => api.close());   // arrastar a barra do topo para baixo fecha, como tocar em Fechar
     $('#sheets').append(el); sheets.push(api); document.documentElement.classList.add('sheet-open');
     requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('open')));
     return api;
   }
+  // Arrastar para baixo fecha (item 34). alca: onde o dedo começa (a barra do topo da tela, ou o menu inteiro). Só puxar
+  // para baixo conta; soltar depois de 110 px, ou rápido, fecha. Se o fechar for recusado (algo sem salvar), volta ao lugar.
+  function arrastarParaFechar(alvo, alca, fechar) {
+    let y0 = null, x0 = 0, t0 = 0, dy = 0, ativo = false;
+    alca.addEventListener('touchstart', (e) => { if (e.touches.length !== 1) { y0 = null; return; } y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; t0 = Date.now(); dy = 0; ativo = false; }, { passive: true });
+    alca.addEventListener('touchmove', (e) => {
+      if (y0 == null) return;
+      const d = e.touches[0].clientY - y0;
+      if (!ativo) { if (d < 8 || Math.abs(e.touches[0].clientX - x0) > d) return; ativo = true; alvo.style.transition = 'none'; }
+      dy = Math.max(0, d); alvo.style.transform = `translateY(${dy}px)`;
+      if (e.cancelable) e.preventDefault();
+    }, { passive: false });
+    const fim = () => {
+      if (y0 == null) return; y0 = null;
+      if (!ativo) return; ativo = false;
+      // o toque que arrastou não vale como toque num botão do que foi arrastado (um aviso que abrir logo depois funciona)
+      const engole = (e) => { if (alca.contains(e.target)) { e.stopPropagation(); e.preventDefault(); } };
+      window.addEventListener('click', engole, true); setTimeout(() => window.removeEventListener('click', engole, true), 400);
+      alvo.style.transition = '';
+      const vel = dy / Math.max(1, Date.now() - t0);
+      if (dy > 110 || (dy > 40 && vel > 0.6)) Promise.resolve(fechar()).then(() => { if (alvo.isConnected && !alvo.classList.contains('closing')) alvo.style.transform = ''; });
+      else alvo.style.transform = '';
+    };
+    alca.addEventListener('touchend', fim); alca.addEventListener('touchcancel', fim);
+  }
   function actionSheet(title, options) {
     const close = () => { wrap.classList.remove('open'); setTimeout(() => wrap.remove(), 280); };
-    const wrap = h('div', { class: 'as-wrap', onclick: (e) => { if (e.target === wrap) close(); } },
-      h('div', { class: 'as', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+    const painel = h('div', { class: 'as', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
         h('div', { class: 'grab' }), h('h3', null, title),
         options.map(([key, ic, tone, t, sub, fn]) => h('button', { class: 'opt', type: 'button', 'data-act': key, onclick: () => { close(); setTimeout(fn, 120); } },
           h('span', { class: 'bubble ' + (tone || '') }, icon(ic)), h('span', { class: 't' }, t, sub ? h('small', null, sub) : null))),
-        h('button', { class: 'btn block cancel', type: 'button', onclick: close }, 'Cancelar')));
+        h('button', { class: 'btn block cancel', type: 'button', onclick: close }, 'Cancelar'));
+    const wrap = h('div', { class: 'as-wrap', onclick: (e) => { if (e.target === wrap) close(); } }, painel);
+    arrastarParaFechar(painel, painel, close);
     document.body.append(wrap);
     requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add('open')));
   }
@@ -1172,9 +1199,9 @@
       kids.push(payCard(d, persist));
       const info = [['Hospital', d.hosp], [d.cols && d.cols.length > 1 ? 'Colegas' : 'Colega', (d.cols || []).join(', ')], ['Sua função', d.funcao], ['Convênio', d.conv], ['Observações', d.notas]].filter((x) => x[1]);
       if (info.length) kids.push(h('div', { class: 'group info' }, info.map(([k, v]) => h('div', { class: 'ir' }, h('span', null, k), h('span', null, v)))));
-      if (d.rep && d.rep.length) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Na planilha de repasse')),
+      if (d.rep && d.rep.length) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'Na planilha de repasse')),
         h('div', { class: 'group flat' }, d.rep.map((l) => rowBtn(null, null, l.procName, [l.conv, l.funcao].filter(Boolean).join(', '), null, h('span', { class: 'v' }, brl(l.valor)))))));
-      if (d.caption) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Legenda no WhatsApp')), h('div', { class: 'caption-box' }, d.caption),
+      if (d.caption) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'Legenda no WhatsApp')), h('div', { class: 'caption-box' }, d.caption),
         d.legendaAnterior ? h('p', { class: 'note' }, `Editada no WhatsApp. Antes era: “${d.legendaAnterior}”.`) : null));
       kids.push(h('div', { class: 'group' },
         h('button', { class: 'rowbtn', type: 'button', onclick: () => mergeInto(d, api) }, h('span', { class: 'bubble plain' }, icon('merge')), h('span', { class: 't' }, 'Juntar com outra ficha', h('small', null, 'Quando a mesma cirurgia aparece duas vezes')), icon('chev', 'chev')),
@@ -1553,7 +1580,7 @@
           return on && st.sel.length > 1 ? h('div', null, row, h('div', { class: 'row', style: 'padding:0 16px 12px 73px' }, h('span', { class: 'small muted' }, 'Desta:'),
             h('input', { type: 'text', inputmode: 'decimal', 'aria-label': 'Valor desta cirurgia', value: moneyInput(st.alloc.get(r.id)), style: 'max-width:150px;min-height:42px', oninput: (e) => { st.alloc.set(r.id, parseMoney(e.target.value)); drawFoot(); } }))) : row;
         });
-        cands.replaceChildren(h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'De qual cirurgia?'), h('span', { class: 'small muted' }, st.sel.length ? plural(st.sel.length, 'escolhida', 'escolhidas') : '')),
+        cands.replaceChildren(h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'De qual cirurgia?'), h('span', { class: 'small muted' }, st.sel.length ? plural(st.sel.length, 'escolhida', 'escolhidas') : '')),
           h('p', { class: 'note' }, 'Toque em uma ou mais. As mais antigas aparecem primeiro.'),
           items.length ? h('div', { class: 'group' }, items) : h('div', { class: 'empty' }, h('p', null, f ? 'Nenhuma cirurgia a receber com esse nome.' : 'Nenhuma cirurgia a receber.')));
       }
@@ -1590,7 +1617,7 @@
       for (const l of [...S.loose].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))) { const k = l.date + ' ' + l.time; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(l); }
       const body = [h('p', { class: 'lead' }, 'Fotos que foram para o grupo sem nenhum texto. Escolha as de uma mesma cirurgia e diga o que fazer com elas. Se preferir, deixe aqui: elas não entram nas contas.')];
       for (const [k, arr] of groups) {
-        body.push(h('div', { class: 'month-h' }, h('h3', { style: 'font-size:17px' }, `Enviadas em ${dataLonga(k.slice(0, 10), { semDia: true, ano: !sameYear(k.slice(0, 10)) })}, às ${horaTxt(k.slice(11))}`), h('span', null, plural(arr.length, 'foto', 'fotos'))));
+        body.push(h('div', { class: 'month-h' }, h('h3', { style: 'font-size:1.0625rem' }, `Enviadas em ${dataLonga(k.slice(0, 10), { semDia: true, ano: !sameYear(k.slice(0, 10)) })}, às ${horaTxt(k.slice(11))}`), h('span', null, plural(arr.length, 'foto', 'fotos'))));
         body.push(h('div', { class: 'pgrid' }, arr.map((l) => h('div', { class: 'ptile' + (sel.has(l.id) ? ' sel' : ''), role: 'checkbox', 'aria-checked': String(sel.has(l.id)), tabindex: '0', onclick: (e) => { if (e.target.closest('.zoom')) return; sel.has(l.id) ? sel.delete(l.id) : sel.add(l.id); api.update(); } },
           photoImg(l.photoId, true), h('span', { class: 'chk' }, sel.has(l.id) ? icon('check') : null),
           h('button', { class: 'zoom', type: 'button', 'aria-label': 'Ver foto grande', onclick: () => openViewer(arr.map((x) => x.photoId), arr.indexOf(l)) }, icon('zoom'))))));
@@ -1893,9 +1920,9 @@
           // só legendas editadas: sem contagem de fotos nem aviso de arquivo sem fotos
           recs.length || nLoose || p.fill.length ? h('div', { class: 'statgrid' }, h('div', null, h('b', null, nPh), h('span', null, nPh === 1 ? 'foto' : 'fotos')), h('div', null, h('b', null, nLoose), h('span', null, 'para organizar')), h('div', null, h('b', null, rev), h('span', null, 'para completar'))) : null,
           zip || !recs.length ? null : tip('Arquivo sem fotos', ' As cirurgias entram sem fotos. Para trazê-las, exporte de novo escolhendo Anexar mídia.', null, null, 'photo', 'warn'),
-          recs.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Veja como ficou')), h('div', { class: 'group' }, [...recs].sort(byDateDesc).slice(0, 40).map((r) => recordItem({ ...r, photoIds: r.photoNames }, () => {})))) : null,
+          recs.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'Veja como ficou')), h('div', { class: 'group' }, [...recs].sort(byDateDesc).slice(0, 40).map((r) => recordItem({ ...r, photoIds: r.photoNames }, () => {})))) : null,
           recs.length > 40 ? h('p', { class: 'note' }, `E mais ${recs.length - 40}.`) : null,
-          nEd ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Legendas editadas no WhatsApp')),
+          nEd ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'Legendas editadas no WhatsApp')),
             h('p', { class: 'note' }, 'São cirurgias que já estão no app. A ficha recebe a legenda nova; se você já tinha mexido nela, ela aparece em Para completar para você conferir.'),
             h('div', { class: 'group' }, p.editadas.map(({ e, r }) => h('div', { class: 'ritem lx' }, dateBadge(r),
               h('span', { class: 'rmain' }, h('span', { class: 'p' }, e.caption), h('span', { class: 'm' }, `Antes: ${r.caption}`)))))) : null],
@@ -2113,7 +2140,7 @@
         return d == null ? 'Opcional. Com ele, o "Recebido no mês" bate com o extrato do banco.' : Math.abs(d) < 0.005 ? 'Igual ao liberado na planilha.' : d > 0 ? `${brl(d)} a menos que o liberado: retenções e taxas.` : `${brl(-d)} a mais que o liberado.`; };
       const difEl = h('small', { id: 'rep-caiu-dif' }, difTxt());
       const caiuIn = h('input', { id: 'rep-caiu', type: 'text', inputmode: 'decimal', placeholder: moneyInput(rep.total), value: moneyInput(st.caiu), 'aria-label': 'Quanto caiu na conta', oninput: (e) => { st.caiu = parseMoney(e.target.value); difEl.textContent = difTxt(); } });
-      const smallLink = (label, fn) => h('button', { class: 'link', type: 'button', style: 'padding:2px 0;font-size:14px', onclick: fn }, label);
+      const smallLink = (label, fn) => h('button', { class: 'link', type: 'button', style: 'padding:2px 0;font-size:.875rem', onclick: fn }, label);
       const mexer = (fn) => () => { fn(); replan(); api.update(); };
       const porPerto = (a) => S.records.filter((r) => Math.abs(C.dayNum(r.date) - C.dayNum(a.date)) <= 1).sort((x, y) => Math.abs(C.dayNum(x.date) - C.dayNum(a.date)) - Math.abs(C.dayNum(y.date) - C.dayNum(a.date)));
       const escolher = (a) => sheetPick('Qual é a cirurgia desta linha?', porPerto(a), async (r) => { st.ligar.set(a.key, r.id); replan(); api.update(); });
@@ -2147,7 +2174,7 @@
             h('span', { class: 'row', style: 'gap:14px;flex-wrap:wrap' }, r && !avisos.length ? h('span', { class: 'st ok' }, a.certeza === 'manual' ? 'ligada por você' : 'mesmo dia e colega') : null, ...links)),
           h('span', { class: 'rside' }, h('span', { class: 'val' }, brl0(a.valor))));
       };
-      const sec = (titulo, nota, lista, id) => h('section', { class: 'sec', id }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, titulo)), nota ? h('p', { class: 'note' }, nota) : null, lista.length ? h('div', { class: 'group' }, lista.map(actLine)) : null);
+      const sec = (titulo, nota, lista, id) => h('section', { class: 'sec', id }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, titulo)), nota ? h('p', { class: 'note' }, nota) : null, lista.length ? h('div', { class: 'group' }, lista.map(actLine)) : null);
       const body = [
         h('div', null, h('h1', { class: 'bigtitle' }, brl(rep.total)), h('p', { class: 'muted', style: 'margin-top:6px' }, [plural(rep.lines.length, 'linha', 'linhas') + ' na planilha', rep.numero ? 'repasse nº ' + rep.numero : null, compName(rep.comp) || null].filter(Boolean).join(', '))),
         h('div', { class: 'group' },
@@ -2156,7 +2183,7 @@
           h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quanto caiu na conta?', difEl), caiuIn),
           h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'De qual hospital é a planilha?'),
             h('div', { class: 'qchips' }, [...hosps.slice(0, 5), ''].map((x) => h('button', { class: 'qchip', type: 'button', 'aria-pressed': String(st.hosp === x), onclick: () => { st.hosp = x; replan(); api.update(); } }, x || 'Não sei'))))),
-        doubtful.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'Confirme os nomes')), h('div', { class: 'group' }, doubtful.map((ex) => { const o = st.over.get(ex);
+        doubtful.length ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'Confirme os nomes')), h('div', { class: 'group' }, doubtful.map((ex) => { const o = st.over.get(ex);
           const pickSel = h('select', { 'aria-label': 'Quem é ' + ex, onchange: (e) => { st.over.set(ex, e.target.value === '__novo__' ? { col: '__novo__', how: 'novo', novo: firstName(ex, colNames), forced: true } : { col: e.target.value, how: 'escolhido', forced: true }); replan(); api.update(); } },
             colNames.map((c) => h('option', { value: c, selected: o.col === c }, c)), h('option', { value: '__novo__', selected: o.col === '__novo__' }, 'Colega novo: ' + firstName(ex, colNames)));
           const pergunta = o.how === 'parecido' || o.how === 'primeiro-nome';
@@ -2511,7 +2538,7 @@
     openSheet({ title: 'Instalar no iPhone', render() {
       const body = [];
       if (PREVIEW) body.push(h('p', { class: 'lead' }, 'Esta prévia mostra cirurgias de exemplo e não guarda nada. As suas cirurgias entram no app de verdade, instalado pelo endereço do GitHub.'));
-      body.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:19px' }, 'No iPhone')), h('ol', { class: 'steps' },
+      body.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'No iPhone')), h('ol', { class: 'steps' },
         h('li', null, h('span', null, 'Abra o endereço do app no ', h('b', null, 'Safari'), PREVIEW ? ': ' : '.', PREVIEW ? h('code', null, 'goborges.github.io/Carol_Controlecirurgias') : null)),
         h('li', null, h('span', null, 'Toque em ', h('b', null, 'Compartilhar'), ' e depois em ', h('b', null, 'Adicionar à Tela de Início'), '.')),
         h('li', null, h('span', null, 'Abra pelo ícone novo e só então traga a conversa do WhatsApp, pelo botão +. O que for importado no Safari não aparece no ícone.')))));
@@ -2528,15 +2555,23 @@
     let hsh = 0; for (const x of data) hsh = (hsh * 31 + x) | 0; return 'w' + (hsh >>> 0).toString(16);
   }
   function sheetPin() {
-    const st = { a: '', b: '', cur: '' };
-    openSheet({ title: 'Senha para abrir', back: true, render(api) {
+    const st = { a: '', b: '', cur: '', fid: null };
+    faceIdDisponivel().then((ok) => { st.fid = ok; if (sheets.includes(api)) api.update(); });
+    const api = openSheet({ title: 'Senha para abrir', back: true, render(api) {
       const pinIn = (k, label) => field(label, h('input', { type: 'password', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 6, autocomplete: 'off', value: st[k], oninput: (e) => { st[k] = e.target.value.replace(/\D/g, ''); } }));
       const body = [h('p', { class: 'lead' }, 'Com a senha ligada, o app pede os números sempre que é aberto. A proteção principal continua sendo o bloqueio do iPhone.')];
       if (S.settings.pinHash) {
+        // Face ID (item 34): só no app instalado (e no modo de teste), e só liga se o próprio iPhone passar no teste
+        if (st.fid || S.settings.faceId) body.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, 'Face ID')),
+          h('div', { class: 'group' }, S.settings.faceId
+            ? rowBtn('check', 'ok', 'Face ID ligado', 'Para entrar, olhe para o iPhone. A senha continua valendo.', null, h('button', { class: 'btn sm', type: 'button', onclick: async () => { delete S.settings.faceId; await saveSettings(); api.update(); toast('Face ID desligado. Vale só a senha.'); } }, 'Desligar'))
+            : rowBtn('lock', 'accent', 'Usar Face ID', 'O app testa no seu iPhone antes de ligar. A senha continua valendo.', async () => {
+              if (await ligarFaceId()) { api.update(); toast('Face ID ligado.'); } else toast('O Face ID não funcionou neste iPhone. A senha continua valendo.', 4500);
+            }))));
         body.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, pinIn('cur', 'Senha atual')));
         return { body, foot: h('button', { class: 'btn danger', type: 'button', onclick: async () => {
           if ((await hashPin(st.cur, S.settings.pinSalt)) !== S.settings.pinHash) { toast('Senha errada.'); return; }
-          S.settings.pinHash = null; S.settings.pinSalt = null; await saveSettings(); render(); api.close(true); toast('Senha desligada.');
+          S.settings.pinHash = null; S.settings.pinSalt = null; delete S.settings.faceId; await saveSettings(); render(); api.close(true); toast('Senha desligada.');
         } }, 'Desligar a senha') };
       }
       body.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() }, pinIn('a', 'Nova senha (4 a 6 números)'), pinIn('b', 'Repita a senha')));
@@ -2547,6 +2582,29 @@
       } }, 'Ligar a senha') };
     } });
   }
+  // ---- Face ID (item 34) ----
+  // Uma chave de acesso do próprio iPhone (WebAuthn) no lugar de digitar a senha. Continua sendo só um bloqueio de tela,
+  // como a senha: nada é criptografado. A chave fica no iPhone; o app guarda só o número dela.
+  const b64u = { de: (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+    para: (t) => Uint8Array.from(atob(t.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((t.length + 3) % 4)), (c) => c.charCodeAt(0)) };
+  const aleatorio = (n) => crypto.getRandomValues(new Uint8Array(n));
+  async function faceIdDisponivel() {
+    try { return !PREVIEW && (isStandalone() || TESTE) && !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch (e) { return false; }
+  }
+  async function entrarComFaceId(id) {
+    const c = await navigator.credentials.get({ publicKey: { challenge: aleatorio(32), allowCredentials: [{ type: 'public-key', id: b64u.para(id) }], userVerification: 'required', timeout: 60000 } });
+    return !!c && b64u.de(c.rawId) === id;
+  }
+  // o teste antes de ligar: criar a chave e, logo depois, entrar com ela. Só liga se as duas coisas derem certo.
+  async function ligarFaceId() {
+    try {
+      const c = await navigator.credentials.create({ publicKey: { challenge: aleatorio(32), rp: { name: APP_NAME }, user: { id: aleatorio(16), name: APP_NAME + (TESTE ? ' (teste)' : ''), displayName: S.settings.nome || APP_NAME },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }], authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' }, timeout: 60000 } });
+      const id = b64u.de(c.rawId);
+      if (!(await entrarComFaceId(id))) return false;
+      S.settings.faceId = { id, em: today() }; await saveSettings(); return true;
+    } catch (e) { anotaErro(e && (e.name || e.message), 'face id'); return false; }
+  }
   let locked = false;
   function lockScreen() {
     if (locked || !S.settings.pinHash) return Promise.resolve();
@@ -2554,10 +2612,17 @@
     return new Promise((res) => {
       const err = h('p', { class: 'err', role: 'alert' });
       const inp = h('input', { type: 'password', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 6, autocomplete: 'off', 'aria-label': 'Senha' });
-      const tryPin = async () => { if ((await hashPin(inp.value, S.settings.pinSalt)) === S.settings.pinHash) { wrap.remove(); locked = false; res(); } else { err.textContent = 'Senha errada.'; inp.value = ''; inp.focus(); } };
-      const wrap = h('div', { class: 'lock' }, h('span', { class: 'halo' }, icon('lock')), h('h2', null, S.settings.nome ? `Oi, ${S.settings.nome}` : APP_NAME),
-        h('form', { class: 'form', style: 'align-items:center;gap:12px', onsubmit: (e) => { e.preventDefault(); tryPin(); } }, inp, err, h('button', { class: 'btn primary', type: 'submit', style: 'min-width:180px' }, 'Entrar')));
-      document.body.append(wrap); setTimeout(() => inp.focus(), 50);
+      const tryPin = async () => { if ((await hashPin(inp.value, S.settings.pinSalt)) === S.settings.pinHash) abrir(); else { err.textContent = 'Senha errada.'; inp.value = ''; inp.focus(); } };
+      const abrir = () => { wrap.remove(); locked = false; res(); };
+      // Face ID ligado: um toque para entrar; a senha continua valendo embaixo
+      const fid = S.settings.faceId && window.PublicKeyCredential ? h('button', { class: 'btn primary', type: 'button', id: 'lock-faceid', style: 'min-width:220px', onclick: async () => {
+        try { if (await entrarComFaceId(S.settings.faceId.id)) { abrir(); return; } } catch (e) { anotaErro(e && (e.name || e.message), 'face id'); }
+        err.textContent = 'O Face ID não abriu. Digite a senha.'; inp.focus();
+      } }, 'Entrar com Face ID') : null;
+      const wrap = h('div', { class: 'lock' }, h('span', { class: 'halo' }, icon('lock')), h('h2', null, S.settings.nome ? `Oi, ${S.settings.nome}` : APP_NAME), fid,
+        h('form', { class: 'form', style: 'align-items:center;gap:12px', onsubmit: (e) => { e.preventDefault(); tryPin(); } }, fid ? h('p', { class: 'muted' }, 'ou digite a senha') : null, inp, err,
+          h('button', { class: fid ? 'btn' : 'btn primary', type: 'submit', style: 'min-width:180px' }, 'Entrar')));
+      document.body.append(wrap); if (!fid) setTimeout(() => inp.focus(), 50);
     });
   }
   let hiddenAt = 0;
@@ -2608,7 +2673,24 @@
   }
 
   // ================= início =================
+  // ---- tamanho de letra do iPhone (item 34) ----
+  // No iPhone, "-apple-system-body" segue Ajustes > Tela e Brilho > Tamanho do Texto (17 px no tamanho padrão). O app usa a
+  // mesma proporção na letra base (16 px no padrão), entre 0,85 e 1,5 vez, para as telas não desmontarem.
+  function escalaDoIphone() {
+    try {
+      if (!(window.CSS && CSS.supports && CSS.supports('font', '-apple-system-body'))) return 1;
+      const el = document.createElement('span'); el.style.cssText = 'font:-apple-system-body;position:absolute;visibility:hidden'; el.textContent = 'x';
+      document.body.append(el); const px = parseFloat(getComputedStyle(el).fontSize); el.remove();
+      return px > 0 ? px / 17 : 1;
+    } catch (e) { return 1; }
+  }
+  function aplicarLetra(k) {
+    const esc = Math.min(1.5, Math.max(0.85, k || escalaDoIphone()));
+    document.documentElement.style.fontSize = Math.abs(esc - 1) < 0.01 ? '' : (16 * esc).toFixed(2) + 'px';
+  }
   async function init() {
+    aplicarLetra();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') aplicarLetra(); });
     try { await load(); } catch (e) {
       $('#main').replaceChildren(h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('alert')), h('p', null, 'Não consegui abrir os dados deste aparelho: ' + (e && e.message))));
       return;
@@ -2646,6 +2728,6 @@
       h('button', { class: 'btn sm', type: 'button', onclick: () => location.reload() }, 'Atualizar')));
   }
   // para os testes automáticos e o diagnóstico no computador (não muda nada sozinho)
-  window.__app = { S, go, render, routeFile, Store, VERSION, DATA_VERSION, DB_VERSION, TESTE, erros: ERROS, mostrarAviso: () => showUpdate(), abrirFicha: (id) => sheetRecord(S.records.find((r) => r.id === id)) };
+  window.__app = { S, go, render, routeFile, Store, VERSION, DATA_VERSION, DB_VERSION, TESTE, erros: ERROS, mostrarAviso: () => showUpdate(), abrirFicha: (id) => sheetRecord(S.records.find((r) => r.id === id)), letra: (k) => { aplicarLetra(k); render(); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
