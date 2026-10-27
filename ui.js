@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.12';
+  const VERSION = '1.13';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -467,16 +467,9 @@
   }
   // Dinheiro que entrou, pelo mês em que caiu. Da planilha em que ela anotou quanto caiu de fato na conta, vale esse
   // valor (já sem retenções e taxas), para bater com o extrato do banco.
-  function recebidoPorMes() {
-    const m = new Map(); const soma = (k, v) => m.set(k, C.round2((m.get(k) || 0) + v));
-    const caiu = new Map(S.repasses.filter((x) => x.caiu != null && x.pay).map((x) => [x.id, x]));
-    for (const r of S.records) for (const p of r.pagamentos || []) {
-      if (!p.data || p.valor == null || (p.origem === 'repasse' && caiu.has(p.repId))) continue;
-      soma(p.data.slice(0, 7), p.valor);
-    }
-    for (const x of caiu.values()) soma(x.pay.slice(0, 7), x.caiu);
-    return m;
-  }
+  function recebidoPorMes() { return new Map([...rel().mesPagamento].map(([k, o]) => [k, o.entrou])); }
+  // os totais de todos os relatórios saem de uma conta só (core.js), conferida pelos testes
+  const rel = () => C.relatorio(S.records, S.repasses, (r) => { const f = fin(r); return { valor: f.aReceber, aprox: f.aprox }; });
   const procText = (r) => (r.procs && r.procs.length ? r.procs.join(' + ') : 'Procedimento não informado');
   function ondeCom(r) {
     const cols = (r.cols || []).filter(Boolean);
@@ -855,29 +848,23 @@
     if (!S.records.length) return [welcome()];
     if (!REL_TABS.some(([k]) => k === S.relTab)) S.relTab = 'meses';
     const out = [seg(REL_TABS, S.relTab, (v) => { S.relTab = v; render(); window.scrollTo(0, 0); }, 'Tipo de relatório')];
+    const t = rel().totais;
+    out.push(h('p', { class: 'note', id: 'rel-totais' }, [plural(t.n, 'cirurgia', 'cirurgias'), brl0(t.recebido) + ' recebidos', t.aReceber ? (t.aprox ? '≈ ' : '') + brl0(t.aReceber) + ' a receber' : null].filter(Boolean).join(' · ')));
     out.push(...({ meses: repMeses, tabela: repTabela, totais: repTotais }[S.relTab])());
+    if (S.relTab !== 'tabela') out.push(h('div', { class: 'group' }, rowBtn('sheet', 'accent', 'Relatório do ano', 'Para o Imposto de Renda e o contador, em PDF', () => sheetAnual())));
     return out;
   }
   function repTotais() {
     return [
       h('section', { class: 'sec' }, secTitle('Por colega'), repGrupo('colegas')),
       h('section', { class: 'sec' }, secTitle('Por hospital'), repGrupo('hospitais')),
-      h('section', { class: 'sec', id: 'sec-convenios' }, secTitle('Por convênio'), h('p', { class: 'note' }, 'Pelo que veio nas planilhas de repasse.'), ...repConvenios())];
+      h('section', { class: 'sec', id: 'sec-convenios' }, secTitle('Por convênio'), h('p', { class: 'note' }, 'Pelo convênio de cada cirurgia.'), ...repConvenios()), repDiferencas()].filter(Boolean);
   }
   // nome curto da operação, para caber na tabela: sem o que está entre parênteses e com "VL" no lugar de videolaparoscópica
   const shortProc = (p) => p.replace(/\s*\([^)]*\)/g, '').replace(/\s+v[íi]deo\s*laparosc[óo]pic[ao]s?\b/gi, ' VL').replace(/\s+laparosc[óo]pic[ao]s?\b/gi, ' lap.').trim();
   const procShort = (r) => (r.procs && r.procs.length ? r.procs.map(shortProc).join(' + ') : 'Sem procedimento');
-  function sumsBy(keyFn) {
-    const by = new Map();
-    for (const r of S.records) for (const k of [].concat(keyFn(r))) {
-      if (!k) continue; if (!by.has(k)) by.set(k, { n: 0, rec: 0, est: 0, nRec: 0, nAb: 0 });
-      const o = by.get(k); o.n++; const f = fin(r);
-      if (f.s === 'semcobranca') continue;
-      o.rec += f.recebido;                           // o que já entrou, inclusive a parte de uma cirurgia paga em parte
-      if (f.s === 'recebido') o.nRec++; else { o.nAb++; if (f.aReceber != null) o.est += f.aReceber; }
-    }
-    return by;
-  }
+  // no formato das telas: rec = recebido (inclusive a parte de uma paga em parte), est = a receber
+  const paraTela = (m) => new Map([...m].map(([k, o]) => [k, { n: o.n, rec: o.recebido, est: o.aReceber, nRec: o.nRec, nAb: o.nAb }]));
   // tabela simples: data, operação, colega, hospital, valor e se recebeu; da mais nova para a mais antiga
   const ddmm = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
   function repTabela() {
@@ -925,7 +912,7 @@
     return first && from > 0 ? out.slice(from) : out;
   }
   function repMeses() {
-    const by = sumsBy((r) => r.date.slice(0, 7));
+    const by = paraTela(rel().mesCirurgia);
     const keys = [...by.keys()].sort();
     const empty = { n: 0, rec: 0, est: 0, nRec: 0, nAb: 0 };
     const last = chartMonths(keys);
@@ -953,26 +940,30 @@
     const pays = recebidoPorMes();
     const out = [chart];
     if (watch.length) out.push(h('section', { class: 'sec' }, secTitle('Para acompanhar'), h('div', { class: 'group' }, watch)));
-    out.push(h('section', { class: 'sec' }, secTitle('Mês a mês'), h('p', { class: 'note' }, 'Pelo mês em que a cirurgia foi feita.'), h('div', { class: 'group flat' }, rows)));
-    if (pays.size) out.push(h('section', { class: 'sec' }, secTitle('Dinheiro que entrou'), h('p', { class: 'note' }, 'Pelo mês em que o pagamento caiu.'),
+    out.push(h('section', { class: 'sec' }, secTitle('Quanto rendeu cada mês'), h('p', { class: 'note' }, 'Pelo mês em que a cirurgia foi feita: o que já entrou e o que falta.'), h('div', { class: 'group flat' }, rows)));
+    if (pays.size) out.push(h('section', { class: 'sec' }, secTitle('Quanto entrou em cada mês'), h('p', { class: 'note' }, 'Pelo mês em que o dinheiro caiu na conta. Da planilha em que você anotou quanto caiu, vale esse valor.'),
       h('div', { class: 'group flat' }, [...pays.keys()].sort().reverse().map((k) => rowBtn(null, null, monthName(k), null, null, h('span', { class: 'v' }, brl(pays.get(k))))))));
     return out;
   }
   function repGrupo(kind) {
-    const by = sumsBy((r) => (kind === 'colegas' ? (r.cols && r.cols.length ? r.cols : 'Sem colega') : r.hosp || 'Sem hospital'));
+    const by = paraTela(rel().por[{ colegas: 'colega', hospitais: 'hospital', convenios: 'convenio' }[kind]]);
     const keys = [...by.keys()].sort((a, b) => by.get(b).n - by.get(a).n);
     return [h('div', { class: 'group' }, keys.map((k) => { const o = by.get(k); const [a, b] = moneyLines(o);
       return h('div', { class: 'rowbtn' }, kind === 'colegas' ? h('span', { class: 'avatar' }, initials(k)) : h('span', { class: 'bubble' }, icon('building')),
         h('span', { class: 't' }, k, h('small', null, plural(o.n, 'cirurgia', 'cirurgias'))), h('span', { class: 'v' }, a, b ? h('small', null, b) : null)); }))];
   }
+  // Diferenças de valor (item 35): o combinado com ela × o que a planilha pagou, e o que entrou a mais que o valor devido.
+  // Só para conferir: não quer dizer que houve erro.
+  function repDiferencas() {
+    const d = rel().diferencas;
+    if (!d.length) return null;
+    return h('section', { class: 'sec', id: 'sec-diferencas' }, secTitle('Onde o valor foi diferente'),
+      h('p', { class: 'note' }, 'Para conferir. Uma diferença não quer dizer que houve erro.'),
+      h('div', { class: 'group' }, d.map((x) => rowBtn('alert', 'warn', procText(x.r), (x.tipo === 'combinado' ? `Combinado ${brl(x.combinado)}; a planilha pagou ${brl(x.devido)}` : `Valor devido ${brl(x.devido)}; entrou ${brl(x.recebido)}`) + ` · ${ddmmyyyy(x.r.date)}`,
+        () => sheetRecord(x.r)))));
+  }
   function repConvenios() {
-    const by = new Map();
-    for (const r of S.records) for (const l of r.rep || []) { const k = l.conv || 'Sem convênio'; if (!by.has(k)) by.set(k, { n: 0, v: 0 }); const o = by.get(k); o.n++; o.v += l.valor; }
-    const keys = [...by.keys()].sort((a, b) => by.get(b).v - by.get(a).v);
-    const out = [];
-    out.push(keys.length ? h('div', { class: 'group' }, keys.map((k) => { const o = by.get(k);
-      return h('div', { class: 'rowbtn' }, h('span', { class: 'bubble' }, icon('sheet')), h('span', { class: 't' }, k, h('small', null, `${plural(o.n, 'procedimento', 'procedimentos')}, média de ${brl0(o.v / o.n)}`)), h('span', { class: 'v' }, brl0(o.v))); }))
-      : h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('sheet')), h('p', null, 'Aparece depois que você abrir uma planilha de repasse.')));
+    const out = [...repGrupo('convenios')];
     if (S.checks.length) out.push(h('section', { class: 'sec', id: 'sec-conferir' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, 'Pagamentos para conferir')),
       h('p', { class: 'note' }, 'Feitas das 19h às 7h, no fim de semana ou em feriado, mas pagas pelo valor do horário normal.'),
       h('div', { class: 'group' }, S.checks.map((c) => { const r = S.records.find((x) => x.id === c.recId); return r ? recordItem(r, (x) => sheetRecord(x)) : null; }))));
@@ -981,6 +972,48 @@
       h('div', { class: 'sec' }, h('p', { class: 'note' }, 'Pela média do que você já recebeu em cada procedimento, juntando os convênios. Das 19h às 7h, no fim de semana e em feriado, conta 30% a mais, como na tabela CBHPM. Quando há dois procedimentos na mesma cirurgia, o segundo conta pela metade.'),
         refs.length ? h('div', { class: 'group flat' }, refs.map(([p, arr]) => rowBtn(null, null, p, `${brl0(C.median(arr))} no horário normal, ${brl0(C.median(arr) * 1.3)} à noite e no fim de semana`))) : null)));
     return out;
+  }
+
+  // ================= relatório do ano (item 36) =================
+  // O que entrou no ano, mês a mês, por fonte pagadora, hospital, colega e convênio, para o Imposto de Renda e o contador.
+  // Na tela, os totais; na impressão (ou "Salvar em PDF"), os quadros mês a mês, numa folha deitada.
+  function sheetAnual() {
+    const anos = C.anosComPagamento(S.records);
+    const hoje = +today().slice(0, 4);
+    const sugerido = String(+today().slice(5, 7) <= 5 ? hoje - 1 : hoje);   // até maio, o ano da declaração é o anterior
+    let ano = anos.includes(sugerido) ? sugerido : anos[0] || String(hoje);
+    return openSheet({ title: 'Relatório do ano', back: true, render(api) {
+      const a = C.relatorioAnual(S.records, S.repasses, ano);
+      const quadro = (titulo, m) => (m.size ? h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, titulo)),
+        h('div', { class: 'group flat' }, [...m].map(([k, o]) => rowBtn(null, null, k, null, null, h('span', { class: 'v' }, brl(o.total)))))) : null);
+      const meses = a.meses.map((v, i) => [i, v]).filter(([, v]) => v);
+      const body = !a.n ? [anos.length > 1 ? seg(anos.slice(0, 4).map((x) => [x, x]), ano, (v) => { ano = v; api.update(); }, 'Ano') : null,
+        h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('sheet')), h('p', null, `Nenhum pagamento com valor em ${ano}.`))] : [
+        anos.length > 1 ? seg(anos.slice(0, 4).map((x) => [x, x]), ano, (v) => { ano = v; api.update(); }, 'Ano') : null,
+        h('div', { id: 'anual-total' }, h('h1', { class: 'bigtitle' }, brl(a.total)), h('p', { class: 'muted', style: 'margin-top:6px' }, `Liberado em ${ano}, em ${plural(a.n, 'pagamento', 'pagamentos')}.` + (Math.abs(a.total - a.totalEntrou) >= 0.005 ? ` Caiu na conta: ${brl(a.totalEntrou)}.` : ''))),
+        h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, 'Mês a mês')), h('div', { class: 'group flat' }, meses.map(([i, v]) => rowBtn(null, null, cap(MES_LONGO[i]), null, null, h('span', { class: 'v' }, brl(v)))))),
+        quadro('Por fonte pagadora', a.porFonte), quadro('Por hospital', a.porHospital), quadro('Por colega', a.porColega), quadro('Por convênio', a.porConvenio),
+        h('p', { class: 'note' }, 'Pela data em que cada pagamento caiu. Fonte pagadora: da planilha, o hospital dela; do pagamento registrado por você, quem pagou. Uma cirurgia com dois colegas entra nos dois. Confira com o seu contador.')];
+      return { body, foot: a.n ? h('button', { class: 'btn primary', type: 'button', onclick: () => imprimirAnual(a) }, icon('share'), 'Imprimir ou salvar em PDF') : null };
+    } });
+  }
+  function imprimirAnual(a) {
+    if (PREVIEW) { confirmDialog({ title: 'Disponível no app instalado', text: 'Nesta prévia o navegador não imprime.', ok: 'Entendi', cancel: false }); return; }
+    const num = (v) => (v ? nf2.format(v) : '');
+    const tabela = (titulo, m) => h('section', null, h('h2', null, titulo), h('table', null,
+      h('thead', null, h('tr', null, h('th', null, ''), MES.map((x) => h('th', null, cap(x))), h('th', null, 'Total'))),
+      h('tbody', null, [...m].map(([k, o]) => h('tr', null, h('th', null, k), o.meses.map((v) => h('td', null, num(v))), h('td', null, num(o.total))))),
+      h('tfoot', null, h('tr', null, h('th', null, 'Total'), a.meses.map((v) => h('td', null, num(v))), h('td', null, num(a.total))))));
+    const area = h('div', { id: 'print-area' },
+      h('h1', null, `${APP_NAME}: relatório de ${a.ano}`),
+      h('p', null, `${S.settings.nome ? S.settings.nome + '. ' : ''}Gerado em ${ddmmyyyy(today())}. Valores liberados (brutos), em reais, pela data em que cada pagamento caiu.` +
+        (Math.abs(a.total - a.totalEntrou) >= 0.005 ? ` Total liberado: ${brl(a.total)}; caiu na conta: ${brl(a.totalEntrou)}.` : ` Total: ${brl(a.total)}.`)),
+      h('p', { class: 'pe' }, 'Fonte pagadora: da planilha de repasse, o hospital dela; do pagamento registrado à mão, quem pagou. Uma cirurgia com dois colegas entra nos dois. Confira com o seu contador.'),
+      tabela('Por fonte pagadora', a.porFonte), tabela('Por hospital', a.porHospital), tabela('Por colega', a.porColega), tabela('Por convênio', a.porConvenio));
+    const fim = () => { area.remove(); window.removeEventListener('afterprint', fim); };
+    for (const velha of document.querySelectorAll('#print-area')) velha.remove();   // de uma impressão que não avisou o fim
+    document.body.append(area); window.addEventListener('afterprint', fim);
+    setTimeout(() => { try { window.print(); } catch (e) { toast('Não deu para imprimir: ' + e.message); fim(); } }, 50);
   }
 
   // ================= Ajustes =================
@@ -2452,7 +2485,7 @@
   function csvCell(v) { const s = v == null ? '' : String(v); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   async function exportCSV() {
     if (PREVIEW) { await confirmDialog({ title: 'Disponível no app instalado', text: 'Nesta prévia o navegador não deixa salvar arquivos.', ok: 'Entendi', cancel: false }); return; }
-    const head = ['Nº', 'Data', 'Hora', 'Urgência', 'Procedimentos', 'Hospital', 'Colegas', 'Função', 'Convênio', 'Situação', 'Valor recebido', 'Data do pagamento', 'Valor a receber (aprox.)', 'Origem', 'Repasse', 'Fotos', 'Legenda'];
+    const head = ['Nº', 'Data', 'Hora', 'Urgência', 'Procedimentos', 'Hospital', 'Colegas', 'Função', 'Convênio', 'Situação', 'Valor recebido', 'Data do pagamento', 'Valor a receber (aprox.)', 'Origem', 'Repasse', 'Fotos', 'Legenda', 'Valor devido', 'Origem do valor devido', 'Saldo', 'Pagamentos'];
     const money = (v) => (v == null ? '' : nf2.format(v).replace(/\./g, ''));
     const rows = [...S.records].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).map((r) => {
       // as mesmas colunas de antes: valor recebido é a soma dos pagamentos (também da cirurgia paga em parte), e a data é
@@ -2460,7 +2493,8 @@
       const v = valueOf(r); const f = fin(r); const ult = f.pg[f.pg.length - 1] || {};
       const reps = uniq(f.pg.filter((p) => p.origem === 'repasse').map((p) => (S.repasses.find((x) => x.id === p.repId) || {}).numero).filter(Boolean)).join(', ');
       return [r.num || '', ddmmyyyy(r.date), r.time || '', urgOf(r) ? 'sim' : '', procText(r), r.hosp || '', (r.cols || []).join(', '), r.funcao || '', r.conv || '', { aberto: 'A receber', parcial: 'Parcial', recebido: 'Recebida', semcobranca: 'Sem cobrança' }[f.s],
-        f.pg.length && !f.semValorAnotado ? money(f.recebido) : '', ult.data ? ddmmyyyy(ult.data) : '', isOpen(r) ? money(v.v) : '', r.origem, reps, (r.photoIds || []).length, (r.caption || '').replace(/\s+/g, ' ')];
+        f.pg.length && !f.semValorAnotado ? money(f.recebido) : '', ult.data ? ddmmyyyy(ult.data) : '', isOpen(r) ? money(v.v) : '', r.origem, reps, (r.photoIds || []).length, (r.caption || '').replace(/\s+/g, ' '),
+        money(f.devido), f.devido == null ? '' : f.origem === 'repasse' ? 'planilha' : 'combinado', f.saldo == null || f.semValorAnotado ? '' : money(f.saldo), f.pg.length];
     });
     const text = '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
     await offerFile(new Blob([text], { type: 'text/csv;charset=utf-8' }), `cirurgias-${today()}.csv`, 'text/csv', 'Planilha pronta', `${plural(rows.length, 'cirurgia', 'cirurgias')}. Abre no Excel, no Numbers e no Google Planilhas.`);

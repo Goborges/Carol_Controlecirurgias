@@ -986,6 +986,94 @@
     return out;
   }
 
+  // ---------- relatórios (itens 35 e 36) ----------
+  // Os totais saem todos daqui, para as telas e o relatório anual baterem entre si (os testes conferem).
+  /** Cada pagamento com valor e data. valor: o liberado (o que a planilha pagou, ou o que ela registrou). entrou: o que
+   *  caiu na conta. Da planilha em que ela anotou quanto caiu, isso é dividido entre os pagamentos dela na proporção do
+   *  liberado (os centavos que sobram vão no maior); dos outros, entrou = valor. */
+  function pagamentosComValor(records, repasses) {
+    const docs = new Map((repasses || []).filter((d) => d.caiu != null).map((d) => [d.id, d]));
+    const out = [], porPlanilha = new Map();
+    for (const r of records) for (const p of r.pagamentos || []) {
+      if (p.valor == null || !p.data) continue;
+      const it = { r, p, mes: p.data.slice(0, 7), valor: round2(p.valor), entrou: round2(p.valor) };
+      if (p.origem === 'repasse' && docs.has(p.repId)) { if (!porPlanilha.has(p.repId)) porPlanilha.set(p.repId, []); porPlanilha.get(p.repId).push(it); }
+      out.push(it);
+    }
+    for (const [id, its] of porPlanilha) {
+      const caiu = round2(docs.get(id).caiu); const lib = round2(its.reduce((t, x) => t + x.valor, 0));
+      if (!(lib > 0)) continue;
+      for (const x of its) x.entrou = round2(x.valor * caiu / lib);
+      // os centavos que sobram do arredondamento vão no maior pagamento (uma linha de R$ 0,00 continua zero)
+      const maior = its.reduce((m, x) => (x.valor > m.valor ? x : m), its[0]);
+      maior.entrou = round2(maior.entrou + caiu - its.reduce((t, x) => t + x.entrou, 0));
+    }
+    return out;
+  }
+  /** Totais dos relatórios. aberto(r) => { valor, aprox } do que falta receber de uma cirurgia a receber (a mesma conta
+   *  do Início). Cirurgia sem cobrança conta na quantidade, sem dinheiro. Uma cirurgia com dois colegas entra nos dois. */
+  function relatorio(records, repasses, aberto) {
+    const novo = () => ({ n: 0, nRec: 0, nAb: 0, recebido: 0, aReceber: 0, aprox: false, semValor: 0 });
+    const totais = { ...novo(), entrou: 0 };
+    const mesCir = new Map(), mesPag = new Map(), por = { hospital: new Map(), colega: new Map(), convenio: new Map() };
+    const pags = pagamentosComValor(records, repasses);
+    const recDe = new Map();
+    for (const x of pags) {
+      recDe.set(x.r, round2((recDe.get(x.r) || 0) + x.valor));
+      if (!mesPag.has(x.mes)) mesPag.set(x.mes, { recebido: 0, entrou: 0, n: 0 });
+      const o = mesPag.get(x.mes); o.recebido = round2(o.recebido + x.valor); o.entrou = round2(o.entrou + x.entrou); o.n++;
+      totais.entrou = round2(totais.entrou + x.entrou);
+    }
+    const somar = (m, k, r, s, rec, ab) => {
+      if (!m.has(k)) m.set(k, novo());
+      const o = m.get(k); o.n++;
+      if (s === 'semcobranca') return;
+      o.recebido = round2(o.recebido + rec);
+      if (s === 'recebido') o.nRec++;
+      else { o.nAb++; if (ab && ab.valor != null) { o.aReceber = round2(o.aReceber + ab.valor); if (ab.aprox) o.aprox = true; } else o.semValor++; }
+    };
+    const diferencas = [];
+    for (const r of records) {
+      const s = situacao(r); const rec = recDe.get(r) || 0;
+      const ab = s === 'aberto' || s === 'parcial' ? aberto(r) : null;
+      somar(new Map([['t', totais]]), 't', r, s, rec, ab);
+      somar(mesCir, (r.date || '').slice(0, 7), r, s, rec, ab);
+      somar(por.hospital, r.hosp || 'Sem hospital', r, s, rec, ab);
+      somar(por.convenio, r.conv || 'Sem convênio', r, s, rec, ab);
+      for (const c of (r.cols && r.cols.length ? r.cols : ['Sem colega'])) somar(por.colega, c, r, s, rec, ab);
+      // diferenças de valor: o combinado com ela × o que a planilha pagou; e o que entrou a mais que o valor devido
+      const ant = r.devidoAntes;
+      if (r.devidoOrigem === 'repasse' && ant && ant.origem === 'combinado' && ant.valor != null && Math.abs(r.devido - ant.valor) >= 0.01) diferencas.push({ r, tipo: 'combinado', combinado: ant.valor, devido: r.devido, recebido: rec });
+      else if (r.devido != null && rec - r.devido > 0.004 && !(r.pagamentos || []).some((p) => p.valor == null)) diferencas.push({ r, tipo: 'a-mais', devido: r.devido, recebido: rec });
+    }
+    const ordem = (m) => new Map([...m.entries()].sort((a, b) => a[0].localeCompare(b[0])));
+    return { totais, mesCirurgia: ordem(mesCir), mesPagamento: ordem(mesPag), por, diferencas: diferencas.sort((a, b) => (b.r.date || '').localeCompare(a.r.date || '')) };
+  }
+  /** O ano para o Imposto de Renda: o que entrou em cada mês do ano, pela data do pagamento, por fonte pagadora, hospital,
+   *  colega e convênio. Fonte pagadora: da planilha, o hospital dela; do pagamento registrado à mão, "Quem pagou" (ou o
+   *  hospital da cirurgia). valor: o liberado (bruto); entrou: o que caiu na conta, quando ela anotou. */
+  function relatorioAnual(records, repasses, ano) {
+    const docs = new Map((repasses || []).map((d) => [d.id, d]));
+    const doze = () => Array(12).fill(0);
+    const out = { ano: String(ano), meses: doze(), entrou: doze(), total: 0, totalEntrou: 0, n: 0, porFonte: new Map(), porHospital: new Map(), porColega: new Map(), porConvenio: new Map() };
+    const add = (m, k, i, v) => { if (!m.has(k)) m.set(k, { meses: doze(), total: 0 }); const o = m.get(k); o.meses[i] = round2(o.meses[i] + v); o.total = round2(o.total + v); };
+    for (const x of pagamentosComValor(records, repasses)) {
+      if (x.p.data.slice(0, 4) !== out.ano || !x.valor) continue;   // linha de R$ 0,00 (glosa) não é dinheiro que entrou
+      const i = +x.p.data.slice(5, 7) - 1; const r = x.r; const v = x.valor;
+      out.meses[i] = round2(out.meses[i] + v); out.entrou[i] = round2(out.entrou[i] + x.entrou);
+      out.total = round2(out.total + v); out.totalEntrou = round2(out.totalEntrou + x.entrou); out.n++;
+      const doc = x.p.origem === 'repasse' ? docs.get(x.p.repId) : null;
+      const fonte = x.p.origem === 'repasse' ? (doc && doc.hosp) || r.hosp || 'Planilha de repasse' : x.p.fonte || r.hosp || 'Não informado';
+      add(out.porFonte, fonte, i, v); add(out.porHospital, r.hosp || 'Sem hospital', i, v); add(out.porConvenio, r.conv || 'Sem convênio', i, v);
+      for (const c of (r.cols && r.cols.length ? r.cols : ['Sem colega'])) add(out.porColega, c, i, v);
+    }
+    const ordem = (m) => new Map([...m.entries()].sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0])));
+    for (const k of ['porFonte', 'porHospital', 'porColega', 'porConvenio']) out[k] = ordem(out[k]);
+    return out;
+  }
+  /** Anos com pagamento, do mais novo para o mais antigo. */
+  const anosComPagamento = (records) => [...new Set(records.flatMap((r) => (r.pagamentos || []).filter((p) => p.valor != null && p.data).map((p) => p.data.slice(0, 4))))].sort().reverse();
+
   // ---------- lembrete mensal (arquivo de calendário) ----------
   /** Evento que se repete todo mês no dia escolhido, com o ritual do app. Hora local (o Calendário usa o fuso do iPhone).
    *  o: { dia: 1..28, hora: 'HH:MM', hoje: 'AAAA-MM-DD', agora: Date } */
@@ -1077,6 +1165,7 @@
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
     totalRecebido, quitada, situacao, emAberto, migrarFinanceiro, compatFinanceiro, reconciliarFinanceiro, pagarPeloRepasse, desfazerRepasseNaFicha,
     juntarComplementos, prazosDePagamento, prazoDe, limiteAtraso, previsaoRecebimento, lembreteIcs,
+    pagamentosComValor, relatorio, relatorioAnual, anosComPagamento,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);
