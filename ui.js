@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.4';
+  const VERSION = '1.5';
   const TERMS_VERSION = 1;
   const $ = (s, el) => (el || document).querySelector(s);
 

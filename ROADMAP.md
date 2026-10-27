@@ -6,8 +6,8 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 
 | | |
 |---|---|
-| Versão do app entregue | 1.4 (27/10/2026, pacote `entrega-1.4.zip`) |
-| Versão publicada no GitHub | 1.0 (envio de 25/10/2026, 21h56); a 1.4 entra quando a entrega for enviada |
+| Versão do app entregue | 1.5 (27/10/2026, pacote `entrega-1.5.zip`) |
+| Versão publicada no GitHub | 1.4 (27/10/2026); a 1.5 entra quando a entrega for enviada |
 | Uso real | A Carol ainda não instalou nem usa o app (confirmado em 26/10/2026): não há dados reais a proteger até ela começar. |
 | Última atualização deste arquivo | 27/10/2026 |
 
@@ -17,7 +17,7 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 |---|---|---|---|
 | 1 | Auditar o repositório (arquivos atuais e histórico) | feito (26/10/2026) | 3 commits, todos de 25/10: `README.md`, `registro-cirurgias.zip` (o pacote do próprio app, sem dados) e os 6 arquivos do app 1.0. Nenhuma conversa, foto, planilha ou nome real, nem no histórico. Nada a remover. |
 | 2 | Congelar a v1.3 e fazer backup dos dados da Carol antes de atualizar | feito (27/10/2026) | Cópia congelada em `versoes/app-cirurgias-1.3.zip`. Backup dispensado: a Carol ainda não usa o app. O formato salvo é o mesmo da 1.0 à 1.4 (banco `registro-cirurgias` versão 1, mesmos stores). |
-| 3 | Testes automáticos do núcleo (Node) com fixtures anonimizadas | pendente | Existe um teste local que usa dados reais e fica fora do repositório; será trocado por fixtures anonimizadas. Falha esperada já conhecida: "VLP colecisto" vira dois procedimentos. |
+| 3 | Testes automáticos do núcleo (Node) com fixtures anonimizadas | feito (27/10/2026, v1.5) | 67 testes em `testes/nucleo.test.js`, com dados inventados em `testes/dados/`: conversa do iPhone com fotos, a mesma conversa com uma legenda editada, conversa do Android e planilha no formato da UMC. Rodam no navegador (`testes/`) e no Node. 11 falhas esperadas: itens 15 (2), 16, 18, 19, 20 (2), 21, 23 e 25 (2). Achado novo, registrado como comportamento atual para decidir depois: uma anotação de texto sem cirurgia vira ficha "Sem procedimento". A glosa (item 24) é tratada na tela, não no núcleo; o teste entra quando o item for feito. |
 | 4 | Roteiro de teste manual no iPhone | pendente | |
 | 5 | Infraestrutura de atualização: versão dos dados com migrações, aviso "Nova versão disponível", botão "Copiar diagnóstico" | pendente | Hoje só os nomes têm versão (`TERMS_VERSION = 1`). |
 | 6 | Dividir o código, se necessário | feito (27/10/2026, v1.4) | Adiantado. O app agora é publicado em arquivos separados (`index.html`, `style.css`, `core.js`, `ui.js`), sem etapa de build: o GitHub guarda o próprio código. O `sw.js` passou a buscar sempre a versão nova quando há internet e a usar a cópia sem internet. Testado: passagem da 1.3 para a 1.4 com os dados mantidos, abertura sem internet e atualização seguinte na primeira recarga. O `ui.js` segue com 131 KB; dividir em módulos só se ficar difícil de editar. |
@@ -54,7 +54,7 @@ Acompanha o roteiro do documento "Prompt do projeto — Controle de Cirurgias". 
 | 22 | Modelo financeiro com migração (estimativa, valor devido, recebimentos, saldo) | pendente | Hoje cada ficha tem `status`, `recebido` (um pagamento) e `valorPrevisto`. |
 | 23 | Pagamentos parciais e complementos | pendente | Confirmado: `planRepasse` só procura fichas em aberto. |
 | 24 | Glosa não é recebimento | pendente | |
-| 25 | Revisão completa da planilha antes de gravar | pendente | Confirmado: `groupActs` junta num ato só duas cirurgias do mesmo dia e colega quando a planilha não tem hora. |
+| 25 | Revisão completa da planilha antes de gravar | pendente | Confirmado: `groupActs` junta num ato só duas cirurgias do mesmo dia e colega quando a planilha não tem hora. Achado no item 3: linha sem hora vira 00:00 e conta como urgência. |
 | 26 | Quanto caiu de fato na conta | pendente | |
 
 ## P4 — Recebimentos e uso diário
@@ -88,3 +88,4 @@ Nuvem, servidor, contas ou sincronização; integração bancária; IA ou OCR na
 |---|---|
 | 26/10/2026 | ROADMAP criado. Item 1 feito: repositório e histórico sem dados reais. |
 | 27/10/2026 | Versão 1.4: itens 2 e 6. App em arquivos separados, cópia da 1.3 guardada em `versoes/`. Nada muda para quem usa. |
+| 27/10/2026 | Versão 1.5: item 3. Testes do núcleo e página de testes. O `sw.js` foi corrigido: abrir outra página do endereço, como a dos testes, podia tomar o lugar do app na cópia usada sem internet. Nada muda para quem usa. |
