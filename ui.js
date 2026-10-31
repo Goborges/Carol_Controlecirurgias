@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.13';
+  const VERSION = '1.14';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -627,7 +627,7 @@
   }
   function recordItem(r, onTap, pressed) {
     const v = valueOf(r); const [st, tone] = statusOf(r);
-    const where = ondeCom(r);
+    const where = [r.paciente, ondeCom(r)].filter(Boolean).join(' · ');   // o paciente primeiro, para achar a cirurgia
     const u = urgOf(r);
     const meta = [where ? h('span', { class: 'w' }, where) : null,
       r.time ? h('span', { class: 'x' }, u ? icon('moon', 'moon') : null, horaTxt(r.time)) : (u ? h('span', { class: 'x' }, icon('moon', 'moon')) : null)].filter(Boolean);
@@ -766,7 +766,7 @@
       if (f.hosp && r.hosp !== f.hosp) return false;
       if (f.conv && r.conv !== f.conv) return false;
       if (q) {
-        const hay = C.norm([procText(r), r.hosp, (r.cols || []).join(' '), r.conv, r.notas, r.caption, ddmmyyyy(r.date), dataLonga(r.date, { ano: true }), r.num ? 'n' + r.num : ''].join(' '));
+        const hay = C.norm([r.paciente, procText(r), r.hosp, (r.cols || []).join(' '), r.conv, r.notas, r.caption, ddmmyyyy(r.date), dataLonga(r.date, { ano: true }), r.num ? 'n' + r.num : ''].join(' '));
         if (!q.split(' ').every((w) => hay.includes(w))) return false;
       }
       return true;
@@ -776,7 +776,7 @@
   function viewLista() {
     if (!S.records.length) return [welcome()];
     const out = [];
-    const search = h('input', { id: 'busca', type: 'search', placeholder: 'Buscar cirurgia, colega ou hospital', value: S.f.q, autocomplete: 'off', 'aria-label': 'Buscar' });
+    const search = h('input', { id: 'busca', type: 'search', placeholder: 'Buscar paciente, cirurgia ou colega', value: S.f.q, autocomplete: 'off', 'aria-label': 'Buscar' });
     search.addEventListener('input', () => { S.f.q = search.value; drawList(); });
     out.push(h('div', { class: 'search' }, icon('search'), search));
     const counts = { todas: S.records.length, aberto: S.records.filter(isOpen).length, atrasadas: S.records.filter(isLate).length, recebido: S.records.filter(isPaid).length, revisar: S.records.filter(needsReview).length };
@@ -887,9 +887,9 @@
       const cols = (r.cols || []).join(', ');
       const recEl = isRec(r) ? h('span', { class: 'pill sim' }, 'Sim') : r.status === 'semcobranca' ? h('span', { class: 'pill sc' }, '—') : sit(r) === 'parcial' ? h('span', { class: 'pill parte' }, 'Parte') : h('span', { class: 'pill nao' }, 'Não');
       kids.push(h('button', { class: 'trow', type: 'button', onclick: () => sheetRecord(r),
-        'aria-label': `${dataLonga(r.date, { ano: true })}: ${procText(r)}${cols ? ', com ' + cols : ''}${r.hosp ? ', ' + r.hosp : ''}. Valor ${valTxt === '—' ? 'sem valor' : valTxt}. ${isRec(r) ? 'Recebida' : r.status === 'semcobranca' ? 'Sem cobrança' : sit(r) === 'parcial' ? 'Recebida em parte' : 'Não recebida'}.` },
-        h('span', { class: 'c-data' }, ddmm(r.date)), h('span', { class: 'c-op' }, procShort(r)),
-        h('span', { class: 'c-sub' }, h('span', { class: cols ? null : 'empty' }, cols || '—'), h('span', { class: r.hosp ? null : 'empty' }, r.hosp || '—')),
+        'aria-label': `${dataLonga(r.date, { ano: true })}: ${procText(r)}${r.paciente ? ', paciente ' + r.paciente : ''}${cols ? ', com ' + cols : ''}${r.hosp ? ', ' + r.hosp : ''}. Valor ${valTxt === '—' ? 'sem valor' : valTxt}. ${isRec(r) ? 'Recebida' : r.status === 'semcobranca' ? 'Sem cobrança' : sit(r) === 'parcial' ? 'Recebida em parte' : 'Não recebida'}.` },
+        h('span', { class: 'c-data' }, ddmm(r.date)), h('span', { class: 'c-op' }, h('span', { class: 'op' }, procShort(r)), r.paciente ? h('span', { class: 'pac' }, r.paciente) : null),
+        h('span', { class: 'c-sub' }, h('span', { class: cols ? null : 'nd' }, cols || '—'), h('span', { class: r.hosp ? null : 'nd' }, r.hosp || '—')),
         h('span', { class: 'c-val' + (v.kind === 'estimado' ? ' aprox' : '') }, valTxt), h('span', { class: 'c-rec' }, recEl)));
     }
     if (!rows.length) kids.push(h('div', { class: 'empty' }, h('p', null, 'Nenhuma cirurgia aqui.')));
@@ -959,7 +959,7 @@
     if (!d.length) return null;
     return h('section', { class: 'sec', id: 'sec-diferencas' }, secTitle('Onde o valor foi diferente'),
       h('p', { class: 'note' }, 'Para conferir. Uma diferença não quer dizer que houve erro.'),
-      h('div', { class: 'group' }, d.map((x) => rowBtn('alert', 'warn', procText(x.r), (x.tipo === 'combinado' ? `Combinado ${brl(x.combinado)}; a planilha pagou ${brl(x.devido)}` : `Valor devido ${brl(x.devido)}; entrou ${brl(x.recebido)}`) + ` · ${ddmmyyyy(x.r.date)}`,
+      h('div', { class: 'group' }, d.map((x) => rowBtn('alert', 'warn', procText(x.r), (x.r.paciente ? x.r.paciente + ' · ' : '') + (x.tipo === 'combinado' ? `Combinado ${brl(x.combinado)}; a planilha pagou ${brl(x.devido)}` : `Valor devido ${brl(x.devido)}; entrou ${brl(x.recebido)}`) + ` · ${ddmmyyyy(x.r.date)}`,
         () => sheetRecord(x.r)))));
   }
   function repConvenios() {
@@ -993,6 +993,8 @@
         h('div', { id: 'anual-total' }, h('h1', { class: 'bigtitle' }, brl(a.total)), h('p', { class: 'muted', style: 'margin-top:6px' }, `Liberado em ${ano}, em ${plural(a.n, 'pagamento', 'pagamentos')}.` + (Math.abs(a.total - a.totalEntrou) >= 0.005 ? ` Caiu na conta: ${brl(a.totalEntrou)}.` : ''))),
         h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { class: 'sm' }, 'Mês a mês')), h('div', { class: 'group flat' }, meses.map(([i, v]) => rowBtn(null, null, cap(MES_LONGO[i]), null, null, h('span', { class: 'v' }, brl(v)))))),
         quadro('Por fonte pagadora', a.porFonte), quadro('Por hospital', a.porHospital), quadro('Por colega', a.porColega), quadro('Por convênio', a.porConvenio),
+        h('details', { class: 'more', id: 'anual-itens' }, h('summary', null, `Ver cada pagamento (${a.itens.length})`),
+          h('div', { class: 'group flat' }, a.itens.map((x) => rowBtn(null, null, `${ddmm(x.data)} · ${x.paciente || x.procs || 'Cirurgia'}`, [x.paciente ? x.procs : null, x.fonte].filter(Boolean).join(' · '), null, h('span', { class: 'v' }, brl(x.valor)))))),
         h('p', { class: 'note' }, 'Pela data em que cada pagamento caiu. Fonte pagadora: da planilha, o hospital dela; do pagamento registrado por você, quem pagou. Uma cirurgia com dois colegas entra nos dois. Confira com o seu contador.')];
       return { body, foot: a.n ? h('button', { class: 'btn primary', type: 'button', onclick: () => imprimirAnual(a) }, icon('share'), 'Imprimir ou salvar em PDF') : null };
     } });
@@ -1009,7 +1011,11 @@
       h('p', null, `${S.settings.nome ? S.settings.nome + '. ' : ''}Gerado em ${ddmmyyyy(today())}. Valores liberados (brutos), em reais, pela data em que cada pagamento caiu.` +
         (Math.abs(a.total - a.totalEntrou) >= 0.005 ? ` Total liberado: ${brl(a.total)}; caiu na conta: ${brl(a.totalEntrou)}.` : ` Total: ${brl(a.total)}.`)),
       h('p', { class: 'pe' }, 'Fonte pagadora: da planilha de repasse, o hospital dela; do pagamento registrado à mão, quem pagou. Uma cirurgia com dois colegas entra nos dois. Confira com o seu contador.'),
-      tabela('Por fonte pagadora', a.porFonte), tabela('Por hospital', a.porHospital), tabela('Por colega', a.porColega), tabela('Por convênio', a.porConvenio));
+      tabela('Por fonte pagadora', a.porFonte), tabela('Por hospital', a.porHospital), tabela('Por colega', a.porColega), tabela('Por convênio', a.porConvenio),
+      h('section', { class: 'lista' }, h('h2', null, 'Cada pagamento'), h('table', null,
+        h('thead', null, h('tr', null, ['Data', 'Paciente', 'Procedimento', 'Fonte pagadora', 'Valor'].map((t) => h('th', null, t)))),
+        h('tbody', null, a.itens.map((x) => h('tr', null, h('td', null, ddmmyyyy(x.data)), h('td', null, x.paciente), h('td', null, x.procs), h('td', null, x.fonte), h('td', null, nf2.format(x.valor))))),
+        h('tfoot', null, h('tr', null, h('th', { colspan: '4' }, 'Total'), h('td', null, nf2.format(a.total)))))));
     const fim = () => { area.remove(); window.removeEventListener('afterprint', fim); };
     for (const velha of document.querySelectorAll('#print-area')) velha.remove();   // de uma impressão que não avisou o fim
     document.body.append(area); window.addEventListener('afterprint', fim);
@@ -1230,7 +1236,7 @@
         h('div', { class: 'btnrow' }, h('button', { class: 'btn sm soft', type: 'button', onclick: startEdit }, 'Completar'),
           h('button', { class: 'btn sm', type: 'button', onclick: async () => { d.revisar = []; d.conferido = true; await persist(); toast('Pronto. Ela sai de Para completar.'); } }, 'Está tudo certo'))));
       kids.push(payCard(d, persist));
-      const info = [['Hospital', d.hosp], [d.cols && d.cols.length > 1 ? 'Colegas' : 'Colega', (d.cols || []).join(', ')], ['Sua função', d.funcao], ['Convênio', d.conv], ['Observações', d.notas]].filter((x) => x[1]);
+      const info = [['Paciente', d.paciente], ['Hospital', d.hosp], [d.cols && d.cols.length > 1 ? 'Colegas' : 'Colega', (d.cols || []).join(', ')], ['Sua função', d.funcao], ['Convênio', d.conv], ['Observações', d.notas]].filter((x) => x[1]);
       if (info.length) kids.push(h('div', { class: 'group info' }, info.map(([k, v]) => h('div', { class: 'ir' }, h('span', null, k), h('span', null, v)))));
       if (d.rep && d.rep.length) kids.push(h('section', { class: 'sec' }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, 'Na planilha de repasse')),
         h('div', { class: 'group flat' }, d.rep.map((l) => rowBtn(null, null, l.procName, [l.conv, l.funcao].filter(Boolean).join(', '), null, h('span', { class: 'v' }, brl(l.valor)))))));
@@ -1268,9 +1274,11 @@
       const procOpts = uniq([...topUsed('procs', 8), 'Colecistectomia videolaparoscópica', 'Apendicectomia videolaparoscópica', 'Herniorrafia']).slice(0, 8);
       // valor combinado = valor devido que ela mesma anotou (o da planilha de repasse entra sozinho)
       const valIn = h('input', { type: 'text', inputmode: 'decimal', value: moneyInput(x.devido), placeholder: 'Se já souber', oninput: (e) => { x.devido = parseMoney(e.target.value); x.devidoOrigem = x.devido != null ? 'combinado' : null; mark(); } });
-      const notas = h('textarea', { rows: 3, placeholder: 'Sem nome nem dados do paciente', oninput: (e) => { x.notas = e.target.value; mark(); } }); notas.value = x.notas || '';
+      const notas = h('textarea', { rows: 3, placeholder: 'Algo para lembrar', oninput: (e) => { x.notas = e.target.value; mark(); } }); notas.value = x.notas || '';
+      const pacIn = h('input', { id: 'ed-paciente', type: 'text', value: x.paciente || '', placeholder: 'Opcional', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'false', enterkeyhint: 'done', oninput: (e) => { x.paciente = e.target.value; mark(); } });
       kids.push(h('form', { class: 'form', onsubmit: (e) => e.preventDefault() },
         h('div', { class: 'grid2' }, field('Data', dateIn), field('Hora', timeIn)), urgEl,
+        field('Paciente', pacIn, 'Fica só neste aparelho e nos seus backups.'),
         h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'O que foi feito'), chipsMulti(x.procs, procOpts), addRow('Outro procedimento', namesOf('proc'), (v) => { if (!x.procs.some((y) => C.norm(y) === C.norm(v))) x.procs.push(v); }, 'ed-proc')),
         h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Hospital'), chipsOne(x.hosp, uniq([...topUsed('hosp', 6), ...namesOf('hosp')]).slice(0, 6), (v) => { x.hosp = v; }), addRow('Outro hospital', namesOf('hosp'), (v) => { x.hosp = v; }, 'ed-hosp')),
         h('div', { class: 'field' }, h('span', { class: 'lbl' }, 'Com quem'), chipsMulti(x.cols, topUsed('cols', 8)), addRow('Outro colega', namesOf('col'), (v) => { if (!x.cols.some((y) => C.norm(y) === C.norm(v))) x.cols.push(v); }, 'ed-col')),
@@ -1284,6 +1292,8 @@
       const x = draft;
       for (const f of pendingAdds) f();
       if (!x.date) { toast('Coloque a data da cirurgia.'); return; }
+      x.paciente = String(x.paciente || '').replace(/\s+/g, ' ').trim() || null;
+      if (x.paciente !== (d.paciente || null)) delete x.pacienteDaPlanilha;   // mudou à mão: o nome passa a ser dela
       // ela conferiu a ficha ao salvar: os avisos da importação saem ("Procedimento novo", hora do envio, legenda editada).
       // O que continua em branco (procedimento, hospital, colega) segue em Para completar até ser preenchido.
       x.revisar = [];
@@ -1516,6 +1526,7 @@
       t.photoIds.push(...d.photoIds);
       if (!t.procs.length) t.procs = d.procs.slice();
       if (!t.hosp) t.hosp = d.hosp; if (!t.cols.length) t.cols = d.cols.slice(); if (!t.time) t.time = d.time; if (!t.conv) t.conv = d.conv;
+      if (!t.paciente && d.paciente) { t.paciente = d.paciente; if (d.pacienteDaPlanilha) t.pacienteDaPlanilha = d.pacienteDaPlanilha; }
       if (d.caption) t.caption = t.caption ? t.caption + '\n' + d.caption : d.caption;
       if (d.notas) t.notas = t.notas ? t.notas + '\n' + d.notas : d.notas;
       // os pagamentos e as linhas da planilha das duas fichas ficam juntos; o valor devido de uma completa o da outra
@@ -1535,11 +1546,11 @@
   function sheetPick(title, records, onPick) {
     let q = '';
     return openSheet({ title, back: true, render(api) {
-      const inp = h('input', { type: 'search', placeholder: 'Buscar por data, procedimento ou colega', value: q, 'aria-label': 'Buscar', autocomplete: 'off' });
+      const inp = h('input', { type: 'search', placeholder: 'Buscar por paciente, data, procedimento ou colega', value: q, 'aria-label': 'Buscar', autocomplete: 'off' });
       const box = h('div', { class: 'group' });
       const draw = () => {
         const nq = C.norm(q);
-        const rs = records.filter((r) => !nq || nq.split(' ').every((w) => C.norm([procText(r), r.hosp, (r.cols || []).join(' '), ddmmyyyy(r.date), dataLonga(r.date, { ano: true })].join(' ')).includes(w))).sort(byDateDesc).slice(0, 80);
+        const rs = records.filter((r) => !nq || nq.split(' ').every((w) => C.norm([r.paciente, procText(r), r.hosp, (r.cols || []).join(' '), ddmmyyyy(r.date), dataLonga(r.date, { ano: true })].join(' ')).includes(w))).sort(byDateDesc).slice(0, 80);
         box.replaceChildren(...(rs.length ? rs.map((r) => recordItem(r, async (x) => { const done = await onPick(x); if (done !== false) api.close(true); })) : [h('div', { class: 'empty' }, h('p', null, 'Nada encontrado.'))]));
       };
       inp.addEventListener('input', () => { q = inp.value; draw(); }); draw();
@@ -1807,6 +1818,24 @@
           h('span', { class: 'row', style: 'gap:8px;margin-top:10px' }, h('button', { class: 'btn sm', type: 'button', onclick: () => caiu(d) }, 'Quanto caiu'),
             h('button', { class: 'btn sm', type: 'button', onclick: async () => { if (await undoRepasse(d, true)) api.update(); } }, 'Desfazer'))))))] };
     } });
+  }
+  // Planilha aberta de novo: para cada cirurgia que ela pagou e que está sem o nome do paciente, o nome das linhas dela
+  // nesta planilha (mesmo dia, hora, código, valor e executor). Só quando dá uma pessoa só. Devolve [[ficha, nome]].
+  function nomesQueFaltam(rep) {
+    if (!rep.lines.some((l) => l.paciente)) return [];
+    const out = [];
+    for (const r of S.records) {
+      if (r.paciente) continue;
+      const minhas = (r.rep || []).filter((l) => l.repId === rep.id);
+      if (!minhas.length) continue;
+      const achou = new Set();
+      for (const l of minhas) {
+        const m = rep.lines.find((x) => x.paciente && x.date === l.date && (x.time || '') === (l.time || '') && String(x.cod || '') === String(l.cod || '') && Math.abs(x.valor - l.valor) < 0.005 && C.norm(x.exec || '') === C.norm(l.exec || ''));
+        if (m) achou.add(m.paciente);
+      }
+      if (achou.size === 1) out.push([r, [...achou][0]]);
+    }
+    return out;
   }
   async function undoRepasse(doc, ask) {
     if (ask && !(await confirmDialog({ title: 'Desfazer esta planilha?', text: 'Os pagamentos dela saem das cirurgias. As que ela pagou voltam para a receber, e as que ela criou são apagadas.', ok: 'Desfazer', danger: true }))) return false;
@@ -2148,8 +2177,15 @@
     const api = openSheet({ title: 'Planilha de repasse', render(api) {
       if (st.step === 'repetido') {
         const old = S.repasses.find((x) => x.id === rep.id);
-        return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('sheet')), h('h2', null, 'Essa planilha já foi aberta'), h('p', null, `Ela entrou no app em ${ddmmyyyy(C.todayStr(new Date(old.importedAt)))}. Se abrir de novo, o app desfaz a anterior e usa esta.`))],
-          foot: [h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Cancelar'), h('button', { class: 'btn primary', type: 'button', onclick: async () => { await undoRepasse(old, false); replan(); st.step = 'plano'; api.update(); } }, 'Abrir de novo')] };
+        const nomes = nomesQueFaltam(rep);   // planilha trazida antes da 1.14: os nomes dos pacientes ainda não estão nas cirurgias
+        return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('sheet')), h('h2', null, 'Essa planilha já foi aberta'), h('p', null, `Ela entrou no app em ${ddmmyyyy(C.todayStr(new Date(old.importedAt)))}. Se abrir de novo, o app desfaz a anterior e usa esta.`),
+          nomes.length ? h('p', null, `Ela tem o nome do paciente de ${plural(nomes.length, 'cirurgia que ainda está sem nome', 'cirurgias que ainda estão sem nome')}. Para trazer só os nomes, sem mexer nos pagamentos, toque em Trazer os nomes.`) : null)],
+          foot: [h('button', { class: 'btn', type: 'button', onclick: () => api.close(true) }, 'Cancelar'),
+            nomes.length ? h('button', { class: 'btn primary', type: 'button', id: 'rep-nomes', onclick: async () => {
+              for (const [r, n] of nomes) { r.paciente = n; r.pacienteDaPlanilha = rep.id; r.rep = (r.rep || []).map((l) => (l.repId === rep.id && !l.paciente ? { ...l, paciente: n } : l)); await saveRecord(r, { sistema: true }); }
+              derive(); render(); api.close(true); toast(plural(nomes.length, 'cirurgia ganhou o nome do paciente.', 'cirurgias ganharam o nome do paciente.'));
+            } }, 'Trazer os nomes') : null,
+            h('button', { class: nomes.length ? 'btn' : 'btn primary', type: 'button', onclick: async () => { await undoRepasse(old, false); replan(); st.step = 'plano'; api.update(); } }, 'Abrir de novo')].filter(Boolean) };
       }
       if (st.step === 'pronto') {
         return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${brl(rep.total)} registrados.`),
@@ -2165,7 +2201,7 @@
       // data ou valor diferente, certeza baixa) e o que entra como cirurgia nova, com ligar à mão e separar.
       const assoc = acts.filter((a) => a.recordId);
       const novas = acts.filter((a) => !a.recordId);
-      const conferir = assoc.filter((a) => a.certeza !== 'manual' && (a.certeza === 'confira' || a.certeza === 'complemento' || a.outras.length || a.difData || a.difValor != null));
+      const conferir = assoc.filter((a) => a.certeza !== 'manual' && (a.certeza === 'confira' || a.certeza === 'complemento' || a.outras.length || a.difData || a.difValor != null || a.difPaciente));
       const seguras = assoc.filter((a) => !conferir.includes(a));
       const doubtful = execs.filter((ex) => { const o = st.over.get(ex); return o.how === 'parecido' || o.how === 'primeiro-nome' || o.how === 'novo' || o.forced; });
       const payIn = h('input', { type: 'date', value: st.pay, 'aria-label': 'Dia em que o dinheiro caiu', oninput: (e) => { st.pay = e.target.value; } });
@@ -2186,6 +2222,7 @@
             : `Esta cirurgia já foi paga (${brl(f.recebido)}). O valor desta linha soma a ela, como complemento.`); }
         if (a.outras.length) avisos.push(a.outras.length === 1 ? 'Há outra cirurgia parecida perto dessa data.' : `Há outras ${a.outras.length} cirurgias parecidas perto dessa data.`);
         if (a.certeza === 'confira') avisos.push('Confira se é a mesma cirurgia.');
+        if (a.difPaciente) avisos.push(`No app, o paciente é ${a.difPaciente}.`);
         if (a.difData) avisos.push(`No app está em ${ddmmyyyy(a.difData)}; vale a data da planilha.`);
         if (a.difValor != null) avisos.push(`O valor combinado era ${brl(a.difValor)}; a planilha paga ${brl(a.valor)}.`);
         if (a.separadoSozinho) avisos.push('Sem hora na planilha: o app separou porque há uma cirurgia para cada linha.');
@@ -2202,9 +2239,10 @@
         if (a.separado && st.separar.has(baseKey(a))) links.push(smallLink('Juntar de novo', mexer(() => st.separar.delete(baseKey(a)))));
         return h('div', { class: 'ritem rv', 'data-ato': a.key }, dateBadge(a),
           h('span', { class: 'rmain' }, h('span', { class: 'p' }, a.procNames.join(' + ')),
+            a.paciente ? h('span', { class: 'm pac' }, 'Paciente: ' + a.paciente) : null,
             h('span', { class: 'm' }, r ? `No app: ${dataLonga(r.date, { semDia: true })}${r.time ? ', ' + horaTxt(r.time) : ''}, ${ondeCom(r) || procText(r)}` : [st.hosp, colName(a) ? 'com ' + colName(a) : ''].filter(Boolean).join(', ')),
             avisos.length ? h('span', { class: 'm warn-txt' }, avisos.join(' ')) : null,
-            h('span', { class: 'row', style: 'gap:14px;flex-wrap:wrap' }, r && !avisos.length ? h('span', { class: 'st ok' }, a.certeza === 'manual' ? 'ligada por você' : 'mesmo dia e colega') : null, ...links)),
+            h('span', { class: 'row', style: 'gap:14px;flex-wrap:wrap' }, r && !avisos.length ? h('span', { class: 'st ok' }, a.certeza === 'manual' ? 'ligada por você' : a.mesmoPaciente ? 'mesmo paciente' : 'mesmo dia e colega') : null, ...links)),
           h('span', { class: 'rside' }, h('span', { class: 'val' }, brl0(a.valor))));
       };
       const sec = (titulo, nota, lista, id) => h('section', { class: 'sec', id }, h('div', { class: 'sec-h' }, h('h2', { style: 'font-size:1.1875rem' }, titulo)), nota ? h('p', { class: 'note' }, nota) : null, lista.length ? h('div', { class: 'group' }, lista.map(actLine)) : null);
@@ -2247,7 +2285,7 @@
       S.terms.push(...termsAdd); await Store.putMany('terms', [...termsAdd, ...termsUpd]); derive();
       const changed = []; let matched = 0, complementos = 0, mesmos = 0, created = 0;
       for (const a of acts) {
-        const lines = a.lines.map((l) => { const t = C.mapRepasseProc(l.proc, S.index); const procName = t ? t.name : C.sentenceCase(l.proc); return { date: l.date, time: l.time, valor: l.valor, conv: l.conv, cod: l.cod, proc: l.proc, procName, fam: C.famOf(S.index, procName), funcao: l.funcao, exec: l.exec, repId: rep.id }; });
+        const lines = a.lines.map((l) => { const t = C.mapRepasseProc(l.proc, S.index); const procName = t ? t.name : C.sentenceCase(l.proc); return { date: l.date, time: l.time, valor: l.valor, conv: l.conv, cod: l.cod, proc: l.proc, procName, fam: C.famOf(S.index, procName), funcao: l.funcao, exec: l.exec, paciente: l.paciente || null, repId: rep.id }; });
         const col = colName(a) || null;
         const pag = { id: C.uid('g'), valor: a.valor, data: st.pay || today(), origem: 'repasse', repId: rep.id };
         const r = a.recordId ? S.records.find((x) => x.id === a.recordId) : null;
@@ -2485,7 +2523,7 @@
   function csvCell(v) { const s = v == null ? '' : String(v); return /[;"\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   async function exportCSV() {
     if (PREVIEW) { await confirmDialog({ title: 'Disponível no app instalado', text: 'Nesta prévia o navegador não deixa salvar arquivos.', ok: 'Entendi', cancel: false }); return; }
-    const head = ['Nº', 'Data', 'Hora', 'Urgência', 'Procedimentos', 'Hospital', 'Colegas', 'Função', 'Convênio', 'Situação', 'Valor recebido', 'Data do pagamento', 'Valor a receber (aprox.)', 'Origem', 'Repasse', 'Fotos', 'Legenda', 'Valor devido', 'Origem do valor devido', 'Saldo', 'Pagamentos'];
+    const head = ['Nº', 'Data', 'Hora', 'Urgência', 'Procedimentos', 'Hospital', 'Colegas', 'Função', 'Convênio', 'Situação', 'Valor recebido', 'Data do pagamento', 'Valor a receber (aprox.)', 'Origem', 'Repasse', 'Fotos', 'Legenda', 'Valor devido', 'Origem do valor devido', 'Saldo', 'Pagamentos', 'Paciente'];
     const money = (v) => (v == null ? '' : nf2.format(v).replace(/\./g, ''));
     const rows = [...S.records].sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).map((r) => {
       // as mesmas colunas de antes: valor recebido é a soma dos pagamentos (também da cirurgia paga em parte), e a data é
@@ -2494,7 +2532,7 @@
       const reps = uniq(f.pg.filter((p) => p.origem === 'repasse').map((p) => (S.repasses.find((x) => x.id === p.repId) || {}).numero).filter(Boolean)).join(', ');
       return [r.num || '', ddmmyyyy(r.date), r.time || '', urgOf(r) ? 'sim' : '', procText(r), r.hosp || '', (r.cols || []).join(', '), r.funcao || '', r.conv || '', { aberto: 'A receber', parcial: 'Parcial', recebido: 'Recebida', semcobranca: 'Sem cobrança' }[f.s],
         f.pg.length && !f.semValorAnotado ? money(f.recebido) : '', ult.data ? ddmmyyyy(ult.data) : '', isOpen(r) ? money(v.v) : '', r.origem, reps, (r.photoIds || []).length, (r.caption || '').replace(/\s+/g, ' '),
-        money(f.devido), f.devido == null ? '' : f.origem === 'repasse' ? 'planilha' : 'combinado', f.saldo == null || f.semValorAnotado ? '' : money(f.saldo), f.pg.length];
+        money(f.devido), f.devido == null ? '' : f.origem === 'repasse' ? 'planilha' : 'combinado', f.saldo == null || f.semValorAnotado ? '' : money(f.saldo), f.pg.length, r.paciente || ''];
     });
     const text = '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
     await offerFile(new Blob([text], { type: 'text/csv;charset=utf-8' }), `cirurgias-${today()}.csv`, 'text/csv', 'Planilha pronta', `${plural(rows.length, 'cirurgia', 'cirurgias')}. Abre no Excel, no Numbers e no Google Planilhas.`);
@@ -2700,6 +2738,7 @@
     });
     recs.push(newRecord({ num: ++num, origem: 'whatsapp', date: day(3), time: '17:50', procs: [], hosp: HC, cols: [A], caption: '(exemplo sem procedimento)', revisar: ['Sem procedimento'], demo: true }));
     recs.push(newRecord({ num: ++num, origem: 'whatsapp', date: day(8), time: '12:30', procs: [hern], hosp: null, cols: [P], caption: 'Hérnia - Prado (exemplo sem hospital)', demo: true }));
+    recs.slice(0, 6).forEach((r, i) => { r.paciente = `Paciente Exemplo ${i + 1}`; });   // nomes inventados, para a prévia mostrar o campo
     for (const r of recs) { delete r.pagamentos; C.migrarFinanceiro(r); C.compatFinanceiro(r); }
     S.terms.push(...terms); S.records.push(...recs);
     S.repasses.push({ id: 'repdemo', numero: '000123', comp: 'exemplo', nome: 'Repasse de exemplo', total: C.round2(total), n: nLines, hosp: HC, pay: day(70), importedAt: Date.now(), demo: true });

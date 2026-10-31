@@ -601,8 +601,10 @@
     valor: ['liberado', 'valor liberado', 'valor pago', 'vl liberado', 'valor repasse', 'valor'],
     funcao: ['funcao medico', 'funcao', 'grau participacao', 'participacao'],
     executor: ['medico executor', 'executor', 'cirurgiao principal', 'cirurgiao', 'medico responsavel'],
+    // só o nome exato da coluna: "Conta paciente" e "Carteira do beneficiário" são números, não o nome
+    paciente: ['paciente', 'nome do paciente', 'nome paciente', 'beneficiario', 'nome do beneficiario'],
   };
-  /** Lê as linhas do repasse. Descarta colunas de paciente, atendimento e conta. */
+  /** Lê as linhas do repasse, com o nome do paciente (desde a 1.14). Descarta atendimento e conta. */
   function parseRepasse(rows, fileName) {
     let hi = -1, map = null;
     for (let i = 0; i < Math.min(rows.length, 15); i++) {
@@ -611,7 +613,7 @@
       for (const [k, names] of Object.entries(HEADERS)) {
         let idx = -1;
         for (const nm of names) { idx = cells.findIndex((c) => c === nm); if (idx >= 0) break; }
-        if (idx < 0 && k !== 'data' && k !== 'valor') for (const nm of names) { idx = cells.findIndex((c) => c && c.includes(nm) && !c.includes('paciente')); if (idx >= 0) break; }
+        if (idx < 0 && k !== 'data' && k !== 'valor' && k !== 'paciente') for (const nm of names) { idx = cells.findIndex((c) => c && c.includes(nm) && !c.includes('paciente')); if (idx >= 0) break; }
         if (idx >= 0) m[k] = idx;
       }
       if (m.data != null && m.procedimento != null && m.valor != null) { hi = i; map = m; break; }
@@ -629,6 +631,7 @@
         proc: String(r[map.procedimento] || '').replace(/\s+/g, ' ').trim(),
         funcao: map.funcao != null && r[map.funcao] ? String(r[map.funcao]).trim() : null,
         exec: map.executor != null && r[map.executor] ? String(r[map.executor]).replace(/\s+/g, ' ').trim() : null,
+        paciente: map.paciente != null ? nomeDaPlanilha(r[map.paciente]) : null,
       });
     }
     const name = String(fileName || '');
@@ -675,12 +678,39 @@
     return null;
   }
 
+  // ---------- nome do paciente (item 38) ----------
+  const PARTICULAS = new Set(['da', 'das', 'de', 'do', 'dos', 'e', 'di', 'du', 'del', 'della', 'van', 'von']);
+  /** Nome que veio da planilha: espaços arrumados; TUDO EM MAIÚSCULAS vira nome próprio ("Fulana de Tal"). Número ou
+   *  vazio: null. */
+  function nomeDaPlanilha(v) {
+    const t = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    if (!t || !/\p{L}/u.test(t)) return null;
+    if (t !== t.toLocaleUpperCase('pt-BR')) return t;
+    return t.toLocaleLowerCase('pt-BR').split(' ').map((w, i) => (i > 0 && PARTICULAS.has(w) ? w
+      : w.replace(/(^|['’-])(\p{L})/gu, (m, p, c) => p + c.toLocaleUpperCase('pt-BR')))).join(' ');
+  }
+  const partesDoNome = (s) => norm(s || '').split(' ').filter((w) => w && !PARTICULAS.has(w));
+  /** É a mesma pessoa? true: o mesmo nome, ou o nome curto dentro do completo, com o mesmo primeiro nome ("Fulana Exemplo"
+   *  e "Fulana de Tal Exemplo"; iniciais valem). null: não dá para saber (falta um dos nomes, ou o nome curto está dentro do
+   *  completo mas sem o primeiro nome, como "Tal"). false: o nome curto não está dentro do completo ("Fulana Teste" e
+   *  "Fulana de Tal"): pede conferência. */
+  function mesmoPaciente(a, b) {
+    const x = partesDoNome(a), y = partesDoNome(b);
+    if (!x.length || !y.length) return null;
+    if (x.join(' ') === y.join(' ')) return true;
+    const [curto, longo] = x.length <= y.length ? [x, y] : [y, x];
+    const tem = (w) => longo.some((v) => v === w || (w.length === 1 && v.startsWith(w)));
+    if (!curto.every(tem)) return false;
+    return curto[0] === longo[0] ? true : null;
+  }
+
   // ---------- cruzamento repasse x cirurgias ----------
-  // Um ato = linhas do mesmo dia, hora e médico executor. separar: chaves de atos que viram um ato por linha.
+  // Um ato = linhas do mesmo dia, hora, médico executor e paciente (quando a planilha tem o nome: duas pessoas nunca são a
+  // mesma cirurgia). separar: chaves de atos que viram um ato por linha.
   function groupActs(lines, separar) {
     const acts = new Map();
     for (const l of lines) {
-      const k = `${l.date}|${l.time || ''}|${norm(l.exec || '')}`;
+      const k = `${l.date}|${l.time || ''}|${norm(l.exec || '')}` + (l.paciente ? '|' + norm(l.paciente) : '');
       if (!acts.has(k)) acts.set(k, { key: k, date: l.date, time: l.time, exec: l.exec, lines: [] });
       acts.get(k).lines.push(l);
     }
@@ -711,6 +741,9 @@
       if (dm <= 90) s += 2; else if (dm <= 240) s += 1;
     }
     if (ctx.hosp && rec.hosp && rec.hosp !== ctx.hosp) s -= 3;
+    // o nome do paciente decide entre cirurgias parecidas; outra pessoa quase nunca é a mesma cirurgia
+    const mp = mesmoPaciente(act.paciente, rec.paciente);
+    if (mp === true) s += 5; else if (mp === false) s -= 6;
     return s;
   }
   /** Propõe pares ato-do-repasse ↔ cirurgia. Não grava nada.
@@ -726,6 +759,7 @@
       a.col = m ? m.term.name : null; a.colHow = m ? m.how : null;
       a.procNames = a.lines.map((l) => { const t = mapRepasseProc(l.proc, index); return t ? t.name : sentenceCase(l.proc); });
       a.valor = round2(a.lines.reduce((s, l) => s + l.valor, 0));
+      a.paciente = (a.lines.find((l) => l.paciente) || {}).paciente || null;
       return a;
     };
     const abertas = records.filter(emAberto);
@@ -735,7 +769,7 @@
     const separar = new Set(opts.separar || []);
     const auto = new Set();
     for (const a of groupActs(rep.lines).map(prep)) {
-      if (a.time || a.lines.length < 2 || separar.has(a.key)) continue;
+      if (a.time || a.lines.length < 2 || separar.has(a.key) || a.paciente) continue;   // com o nome, já se sabe que é a mesma pessoa
       const cont = new Map(); for (const p of a.procNames) cont.set(p, (cont.get(p) || 0) + 1);
       for (const [p, k] of cont) {
         if (k < 2) continue;
@@ -788,6 +822,8 @@
       }
       a.outras = a.certeza === 'manual' ? [] : (scores.get(ai) || []).filter((x) => x.r.id !== a.recordId && x.sc >= Math.max(5, (a.score || 0) - 1)).map((x) => x.r.id);
       a.difData = r.date !== a.date ? r.date : null;
+      const mp = mesmoPaciente(a.paciente, r.paciente);
+      a.mesmoPaciente = mp === true; a.difPaciente = mp === false ? r.paciente : null;
       a.difValor = r.devidoOrigem === 'combinado' && r.devido != null && Math.abs(r.devido - a.valor) > 0.009 ? r.devido : null;
     });
     return acts;
@@ -900,6 +936,7 @@
     if (r.devidoOrigem !== 'repasse' && !r.devidoAntes) r.devidoAntes = { valor: r.devido != null ? r.devido : null, origem: r.devidoOrigem || null };
     r.devido = round2(base + a.valor); r.devidoOrigem = 'repasse';
     r.pagamentos.push(pag); r.rep = [...(r.rep || []), ...linhas];
+    if (!r.paciente && a.paciente) { r.paciente = a.paciente; r.pacienteDaPlanilha = pag.repId; }   // o nome que faltava
     if (r.status === 'semcobranca') r.status = 'aberto';
     return r;
   }
@@ -925,6 +962,7 @@
       if (outroRep) r.devido = round2(r.devido - saem.reduce((s, p) => s + (p.valor || 0), 0));
       else { const ant = r.devidoAntes || { valor: null, origem: null }; r.devido = ant.valor; r.devidoOrigem = ant.origem; delete r.devidoAntes; }
     }
+    if (r.pacienteDaPlanilha === repId) { delete r.paciente; delete r.pacienteDaPlanilha; }
     if (!outroRep && r.antesDaPlanilha) {
       const ap = r.antesDaPlanilha; r.date = ap.date; r.time = ap.time;
       r.revisar = [...new Set([...(r.revisar || []), ...(ap.avisos || [])])];
@@ -1055,7 +1093,7 @@
   function relatorioAnual(records, repasses, ano) {
     const docs = new Map((repasses || []).map((d) => [d.id, d]));
     const doze = () => Array(12).fill(0);
-    const out = { ano: String(ano), meses: doze(), entrou: doze(), total: 0, totalEntrou: 0, n: 0, porFonte: new Map(), porHospital: new Map(), porColega: new Map(), porConvenio: new Map() };
+    const out = { ano: String(ano), meses: doze(), entrou: doze(), total: 0, totalEntrou: 0, n: 0, porFonte: new Map(), porHospital: new Map(), porColega: new Map(), porConvenio: new Map(), itens: [] };
     const add = (m, k, i, v) => { if (!m.has(k)) m.set(k, { meses: doze(), total: 0 }); const o = m.get(k); o.meses[i] = round2(o.meses[i] + v); o.total = round2(o.total + v); };
     for (const x of pagamentosComValor(records, repasses)) {
       if (x.p.data.slice(0, 4) !== out.ano || !x.valor) continue;   // linha de R$ 0,00 (glosa) não é dinheiro que entrou
@@ -1065,10 +1103,13 @@
       const doc = x.p.origem === 'repasse' ? docs.get(x.p.repId) : null;
       const fonte = x.p.origem === 'repasse' ? (doc && doc.hosp) || r.hosp || 'Planilha de repasse' : x.p.fonte || r.hosp || 'Não informado';
       add(out.porFonte, fonte, i, v); add(out.porHospital, r.hosp || 'Sem hospital', i, v); add(out.porConvenio, r.conv || 'Sem convênio', i, v);
+      // cada pagamento, para o contador conferir: data, paciente, procedimento, quem pagou e o valor
+      out.itens.push({ data: x.p.data, num: r.num || 0, paciente: r.paciente || '', procs: (r.procs || []).join(' + '), fonte, valor: v, entrou: x.entrou });
       for (const c of (r.cols && r.cols.length ? r.cols : ['Sem colega'])) add(out.porColega, c, i, v);
     }
     const ordem = (m) => new Map([...m.entries()].sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0])));
     for (const k of ['porFonte', 'porHospital', 'porColega', 'porConvenio']) out[k] = ordem(out[k]);
+    out.itens.sort((a, b) => a.data.localeCompare(b.data) || a.num - b.num);
     return out;
   }
   /** Anos com pagamento, do mais novo para o mais antigo. */
@@ -1165,7 +1206,7 @@
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
     totalRecebido, quitada, situacao, emAberto, migrarFinanceiro, compatFinanceiro, reconciliarFinanceiro, pagarPeloRepasse, desfazerRepasseNaFicha,
     juntarComplementos, prazosDePagamento, prazoDe, limiteAtraso, previsaoRecebimento, lembreteIcs,
-    pagamentosComValor, relatorio, relatorioAnual, anosComPagamento,
+    pagamentosComValor, relatorio, relatorioAnual, anosComPagamento, nomeDaPlanilha, mesmoPaciente,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

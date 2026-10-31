@@ -230,10 +230,11 @@
       const rep = await repasse();
       igual([rep.id, rep.numero, rep.comp], ['rep900001', '900001', '09'], 'número e competência');
     });
-    teste('Planilha de repasse', 'descarta paciente, atendimento e conta', async () => {
+    // desde a 1.14 (decisão do Gustavo, 31/10/2026), o nome do paciente fica; atendimento e conta continuam de fora
+    teste('Planilha de repasse', 'guarda o nome do paciente e descarta atendimento e conta', async () => {
       const rep = await repasse(); const tudo = JSON.stringify(rep);
-      verdade(rep.lines.every((l) => Object.keys(l).every((k) => ['date', 'time', 'valor', 'conv', 'cod', 'proc', 'funcao', 'exec'].includes(k))), 'linha com coluna a mais');
-      verdade(!/paciente|7000\d\d|8000\d\d/i.test(tudo), 'sobrou dado de paciente, atendimento ou conta');
+      verdade(rep.lines.every((l) => Object.keys(l).every((k) => ['date', 'time', 'valor', 'conv', 'cod', 'proc', 'funcao', 'exec', 'paciente'].includes(k))), 'linha com coluna a mais');
+      verdade(!/7000\d\d|8000\d\d/.test(tudo), 'sobrou número de atendimento ou de conta');
     });
     teste('Planilha de repasse', 'lê data, hora, valor, função e executor', async () => {
       const l = (await repasse()).lines[1];
@@ -309,7 +310,11 @@
     teste('Cruzamento', 'mesmo procedimento duas vezes sem hora, mas uma cirurgia só no app: continua um ato (pode ser bilateral)', async () => {
       const c = await conversa(); const rep = await repasse();
       const recs = c.recs.filter((r) => !(r.date === '2026-09-17' && r.msgTime === '15:10'));
-      igual(C.planRepasse(rep, recs, c.index, { hosp: 'UMC' }).filter((x) => x.date === '2026-09-17').map((a) => a.lines.length), [2], 'atos de 17/09');
+      // a mesma pessoa nas duas linhas (planilha com o nome) ou planilha sem o nome do paciente
+      for (const pac of ['Paciente Fictício 05', null]) {
+        const um = { ...rep, lines: rep.lines.map((l) => (l.date === '2026-09-17' ? { ...l, paciente: pac } : l)) };
+        igual(C.planRepasse(um, recs, c.index, { hosp: 'UMC' }).filter((x) => x.date === '2026-09-17').map((a) => a.lines.length), [2], 'atos de 17/09' + (pac ? ', mesma pessoa' : ', sem nome'));
+      }
     });
     teste('Cruzamento', 'ligar à mão, marcar como nova e separar à mão', async () => {
       const c = await conversa(); const rep = await repasse();
@@ -319,7 +324,8 @@
       const acts = C.planRepasse(rep, c.recs, c.index, { hosp: 'UMC', ligar: new Map([[k22, r04.id], [k02, null]]) });
       const a22 = acts.find((x) => x.key === k22), a02 = acts.find((x) => x.key === k02);
       igual([a22.recordId, a22.certeza, a02.recordId, a02.certeza], [r04.id, 'manual', null, 'novo'], 'à mão');
-      const dois = { id: 'r2', lines: [{ ...rep.lines[0], time: null }, { ...rep.lines[2], time: null, exec: rep.lines[0].exec }] };
+      const dois = { id: 'r2', lines: [{ ...rep.lines[0], time: null, paciente: null }, { ...rep.lines[2], date: rep.lines[0].date, time: null, exec: rep.lines[0].exec, paciente: null }] };
+      igual(C.planRepasse(dois, c.recs, c.index, { hosp: 'UMC' }).length, 1, 'sem o nome do paciente, um ato só');
       const k = C.planRepasse(dois, c.recs, c.index, { hosp: 'UMC' })[0].key;
       igual(C.planRepasse(dois, c.recs, c.index, { hosp: 'UMC', separar: new Set([k]) }).length, 2, 'separado');
     });
@@ -333,6 +339,57 @@
       const r = { id: 'x', status: 'aberto', pagamentos: [], devido: 500, devidoOrigem: 'combinado', date: '2026-09-09', time: null, procs: [CVL], hosp: 'UMC', cols: ['Bruno'] };
       const a = C.planRepasse({ id: 'r', lines: [{ date: '2026-09-10', time: '10:00', valor: 444.02, conv: 'X', cod: '1', proc: 'COLECISTECTOMIA SEM COLANGIOGRAFIA POR VIDEOLAPAROSCOPIA', funcao: 'Primeiro Auxiliar', exec: 'Bruno' }] }, [r], idx, { hosp: 'UMC' })[0];
       igual([a.recordId, a.difData, a.difValor], ['x', '2026-09-09', 500], 'diferenças');
+    });
+
+    // ---------- nome do paciente (item 38) ----------
+    teste('Paciente', 'a planilha traz o nome do paciente de cada linha, sem confundir com a conta do paciente', async () => {
+      const rep = await repasse();
+      igual(rep.lines.map((l) => l.paciente), ['Paciente Fictício 01', 'Paciente Fictício 02', 'Paciente Fictício 03', 'Paciente Fictício 04', 'Paciente Fictício 05', 'Paciente Fictício 06', 'Paciente Fictício 07', 'Paciente Fictício 08'], 'nomes');
+      const semColuna = C.parseRepasse([['Data procedimento', 'Conta paciente', 'Procedimento', 'Liberado'], [46267.4, 800001, 'COLECISTECTOMIA', 100]], 'x.xlsx');
+      igual(semColuna.lines[0].paciente, null, 'a conta do paciente não é o nome');
+    });
+    teste('Paciente', 'nome em maiúsculas vira nome próprio; o que ela digitou fica como está', () => {
+      igual([C.nomeDaPlanilha('FULANA DE TAL  EXEMPLO'), C.nomeDaPlanilha('SICRANO D\'ÁGUA DOS TESTES'), C.nomeDaPlanilha('Beltrana McTeste'), C.nomeDaPlanilha('  '), C.nomeDaPlanilha('800001')],
+        ['Fulana de Tal Exemplo', "Sicrano D'Água dos Testes", 'Beltrana McTeste', null, null], 'nomes');
+    });
+    teste('Paciente', 'mesmo paciente: nome completo, nome curto e iniciais; outra pessoa', () => {
+      const casos = [['Fulana de Tal Exemplo', 'FULANA DE TAL EXEMPLO'], ['Fulana Exemplo', 'Fulana de Tal Exemplo'], ['Fulana E.', 'Fulana de Tal Exemplo'], ['Fulana', 'Fulana de Tal'],
+        ['Beltrana Teste', 'Fulana de Tal Exemplo'], ['Fulana Teste', 'Fulana de Tal'], ['Paciente Fictício 05', 'Paciente Fictício 06'], ['Tal', 'Fulana de Tal'], ['', 'Fulana'], [null, null]];
+      igual(casos.map(([a, b]) => C.mesmoPaciente(a, b)), [true, true, true, true, false, false, false, null, null, null], 'casos');
+    });
+    teste('Paciente', 'duas pessoas no mesmo dia, sem hora, com o mesmo colega: são duas cirurgias', () => {
+      const linha = (proc, paciente) => ({ date: '2026-09-20', time: null, valor: 100, conv: 'X', cod: '1', proc, funcao: 'Primeiro Auxiliar', exec: 'Bruno Teixeira Lima', paciente });
+      igual(C.groupActs([linha('COLECISTECTOMIA', 'Paciente Fictício 22'), linha('FECHAMENTO DE PAREDE ABDOMINAL', 'Paciente Fictício 23')]).length, 2, 'pessoas diferentes');
+      igual(C.groupActs([linha('COLECISTECTOMIA', 'Paciente Fictício 22'), linha('FECHAMENTO DE PAREDE ABDOMINAL', 'Paciente Fictício 22')]).length, 1, 'a mesma pessoa');
+    });
+    teste('Paciente', 'o nome do paciente liga cada linha à cirurgia certa, entre duas iguais no mesmo dia', async () => {
+      const c = await conversa(); const rep = await repasse();
+      // as duas de 17/09: a das 08:30 é de quem está na linha 5; a hora do envio sozinha ligaria ao contrário
+      const recs = c.recs.map((r) => (r.date === '2026-09-17' ? { ...r, paciente: r.msgTime === '08:30' ? 'Paciente Fictício 05' : 'Paciente Fictício 06' } : r));
+      const acts = C.planRepasse(rep, recs, c.index, { hosp: 'UMC' }).filter((x) => x.date === '2026-09-17');
+      igual(acts.map((a) => [a.paciente, recs.find((r) => r.id === a.recordId).paciente, a.certeza, a.mesmoPaciente, a.outras.length]),
+        [['Paciente Fictício 05', 'Paciente Fictício 05', 'alta', true, 0], ['Paciente Fictício 06', 'Paciente Fictício 06', 'alta', true, 0]], 'ligações');
+    });
+    teste('Paciente', 'outro paciente na cirurgia do app: a linha pede conferência e não vira complemento', async () => {
+      const c = await conversa(); const rep = await repasse();
+      const recs = c.recs.map((r) => (r.date === '2026-09-02' ? { ...r, paciente: 'Beltrana Teste' } : r));
+      const a = C.planRepasse(rep, recs, c.index, { hosp: 'UMC' }).find((x) => x.date === '2026-09-02');
+      igual([a.certeza, a.difPaciente], ['confira', 'Beltrana Teste'], 'aberta');
+      const paga = recs.map((r) => (r.date === '2026-09-02' ? { ...r, devido: 444.02, devidoOrigem: 'repasse', pagamentos: [{ id: 'p', valor: 444.02, data: '2026-10-05', origem: 'repasse', repId: 'A' }] } : r));
+      const b = C.planRepasse({ id: 'B', lines: [{ ...rep.lines[0], valor: 50 }] }, paga, c.index, { hosp: 'UMC' })[0];
+      igual([b.recordId, b.certeza], [null, 'novo'], 'outra pessoa não é complemento');
+    });
+    teste('Paciente', 'a planilha preenche o nome que falta; desfazer a planilha tira só o que veio dela', () => {
+      const pag = { id: 'p', valor: 100, data: '2026-10-05', origem: 'repasse', repId: 'A' };
+      const vazia = { id: 'x', date: '2026-09-02', devido: null, devidoOrigem: null, pagamentos: [], rep: [] };
+      C.pagarPeloRepasse(vazia, { valor: 100, paciente: 'Paciente Fictício 01' }, [{ repId: 'A', valor: 100 }], pag);
+      igual([vazia.paciente, vazia.pacienteDaPlanilha], ['Paciente Fictício 01', 'A'], 'preenchido');
+      C.desfazerRepasseNaFicha(vazia, 'A');
+      igual(['paciente' in vazia, 'pacienteDaPlanilha' in vazia], [false, false], 'desfeito');
+      const dela = { id: 'y', date: '2026-09-02', paciente: 'Fulana Exemplo', devido: null, devidoOrigem: null, pagamentos: [], rep: [] };
+      C.pagarPeloRepasse(dela, { valor: 100, paciente: 'Fulana de Tal Exemplo' }, [{ repId: 'A', valor: 100 }], { ...pag });
+      C.desfazerRepasseNaFicha(dela, 'A');
+      igual(dela.paciente, 'Fulana Exemplo', 'o que ela digitou fica');
     });
 
     // ---------- modelo financeiro ----------
@@ -516,6 +573,9 @@
       igual([soma(a.porFonte, 'total'), soma(a.porHospital, 'total'), soma(a.porConvenio, 'total')], [844.02, 844.02, 844.02], 'cada quadro soma o total');
       igual([...C.relatorioAnual(recs, reps, 2025).porFonte].map(([k, o]) => [k, o.total]), [['HC', 1000]], 'sem quem pagou, o hospital da cirurgia');
       igual(C.anosComPagamento(recs), ['2026', '2025'], 'anos');
+      const comNome = recs.map((r) => (r.id === 'r3' ? { ...r, paciente: 'Paciente Fictício 03', num: 3 } : r));
+      igual(C.relatorioAnual(comNome, reps, 2026).itens.map((x) => [x.data, x.paciente, x.fonte, x.valor]),
+        [['2026-09-15', 'Paciente Fictício 03', 'Lia', 100], ['2026-10-05', '', 'UMC', 444.02], ['2026-10-05', '', 'UMC', 300]], 'cada pagamento, com o paciente');
     });
 
     // ---------- lembrete mensal ----------
