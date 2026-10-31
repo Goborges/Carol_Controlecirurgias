@@ -383,10 +383,12 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
 .trow.year { display: block; background: var(--fill); font-family: var(--font-display); font-weight: 700; font-size: 0.875rem; color: var(--muted); padding-block: 6px; }
 .trow.year + .trow::before { display: none; }
 .c-data { grid-area: d; align-self: start; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.8438rem; padding-top: 1px; }
-.c-op { grid-area: o; font-weight: 600; overflow-wrap: break-word; hyphens: auto; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.c-op { grid-area: o; font-weight: 600; min-width: 0; }
+.c-op .op { overflow-wrap: break-word; hyphens: auto; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.c-op .pac { display: block; font-weight: 400; font-size: 0.8125rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .c-sub { grid-area: s; color: var(--muted); font-size: 0.8125rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.c-sub > span:not(.empty) + span:not(.empty)::before { content: ", "; }
-.c-sub > .empty { display: none; }
+.c-sub > span:not(.nd) + span:not(.nd)::before { content: ", "; }
+.c-sub > .nd { display: none; }
 .c-val { grid-area: v; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; }
 .c-val.aprox { color: var(--muted); font-weight: 500; }
 .c-rec { grid-area: r; justify-self: center; }
@@ -407,7 +409,7 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
   .trow.head .c-sub > span { color: var(--muted); font-size: 0.7812rem; }
   .trow.head .c-sub > span:last-child::first-letter { text-transform: uppercase; }
   .c-sub > span::before { content: none !important; }
-  .c-sub > .empty { display: block; color: var(--faint); }
+  .c-sub > .nd { display: block; color: var(--faint); }
   .c-data { font-size: 0.875rem; }
   .trow.head .c-rec { justify-self: center; }
   .pgrid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -457,6 +459,7 @@ textarea.diag { font: .8125rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospa
 /* revisão da planilha: o que está no app e os avisos quebram em várias linhas */
 .ritem.rv { cursor: default; }
 .ritem.rv .rmain .m { white-space: normal; display: block; }
+.ritem.rv .rmain .m.pac { color: var(--ink); }
 .lx-ph { width: 46px; height: 46px; border-radius: 12px; overflow: hidden; background: var(--fill); display: grid; place-items: center; color: var(--muted); }
 .lx-ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -478,4 +481,11 @@ textarea.diag { font: .8125rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospa
   #print-area thead th { border-bottom: 1pt solid #000; }
   #print-area tfoot th, #print-area tfoot td { font-weight: 700; border-top: 1pt solid #000; }
   #print-area .pe { font-size: 8pt; color: #333; }
+  #print-area section.lista { break-inside: auto; }
+  #print-area .lista table { table-layout: auto; }
+  #print-area .lista th:first-child { width: auto; }
+  #print-area .lista th, #print-area .lista td { text-align: left; white-space: normal; }
+  #print-area .lista td:last-child, #print-area .lista tfoot td { text-align: right; white-space: nowrap; }
+  #print-area .lista thead { display: table-header-group; }
+  #print-area .lista tr { break-inside: avoid; }
 }

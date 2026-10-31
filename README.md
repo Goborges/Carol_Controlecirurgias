@@ -33,6 +33,8 @@ Endereço: https://goborges.github.io/Carol_Controlecirurgias/
 
 No próprio aparelho, no banco do navegador (IndexedDB), nas listas: `records` (cirurgias), `photos` (fotos originais), `thumbs` (miniaturas), `loose` (fotos sem legenda), `terms` (nomes e abreviações), `repasses` (planilhas), `imports` (conversas importadas), `trash` (lixeira de 30 dias), `ignored` (mensagens da conversa que o app não traz de novo) e `meta` (ajustes).
 
+Nome do paciente (desde a 1.14, decisão do Gustavo em 31/10/2026): campo `paciente` na ficha, opcional, digitado por ela ou lido da coluna "Paciente" da planilha de repasse (`pacienteDaPlanilha` marca o que veio de uma planilha, para desfazer junto). Fica só no aparelho e nos backups, e aparece nos relatórios e na planilha exportada. O diagnóstico nunca leva nomes. No repositório, só nomes inventados ("Paciente Fictício").
+
 O dinheiro de cada cirurgia (desde a 1.9): `devido` (valor devido; `devidoOrigem` diz se foi combinado por ela ou veio da planilha; vazio é "a definir") e `pagamentos` (cada um com valor, data, origem e planilha). Saldo e situação (a receber, parcial, recebida, sem cobrança) são calculados no `core.js`. Os campos antigos `status`, `recebido` e `valorPrevisto` continuam gravados como espelho, para a versão anterior abrir os dados se for preciso voltar; ao abrir a 1.9 de novo, o que foi feito na versão anterior entra no modelo novo. Limite conhecido: na 1.8, desfazer uma planilha de complemento tira da cirurgia também o pagamento da primeira planilha, porque a 1.8 não conhece complementos.
 
 ## Testes

@@ -51,7 +51,7 @@ Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Esc
 
 Em **Confirme os nomes**, o app pergunta se Bruno Teixeira Lima, Lia Monteiro Alves e Otavio Prado Reis são a mesma pessoa que Bruno, Lia e Otávio. Deixe **Sim**. Bruno Carvalho Dias aparece como colega novo, porque já há outro Bruno na planilha.
 
-Mais abaixo, **deve aparecer** a parte **Confira**, com as duas cirurgias de 17 de setembro. A planilha não tem a hora delas, e o app separou uma cirurgia para cada linha. Não precisa mexer.
+Cada linha da planilha **deve mostrar** o nome do paciente, por exemplo "Paciente: Paciente Fictício 01". Mais abaixo, **deve aparecer** a parte **Confira**, com as duas cirurgias de 17 de setembro: a planilha não tem a hora delas, e cada uma é de um paciente. Não precisa mexer.
 
 Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve aparecer** "R$ 19,73 a menos que o liberado: retenções e taxas". Toque em **Confirmar**.
 
@@ -75,20 +75,27 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 4. Toque em **Desfazer**. **Deve aparecer** de novo "Falta receber R$ 250,00". Feche a cirurgia.
 5. No **Início**, o cartão "Para receber" **deve mostrar** "R$ 250 confirmados + ≈ R$ … estimados". Em **Recebimentos**, a cirurgia aparece em "Pagas em parte".
 
-## 7. Lixeira e Desfazer
+## 7. Nome do paciente
+
+1. Em **Cirurgias**, abra a de **2 de setembro**. **Deve aparecer** "Paciente: Paciente Fictício 01", que veio da planilha.
+2. Abra a de **8 de setembro**, toque em **Editar** e, em **Paciente**, escreva `Fulana Exemplo`. Toque em **Salvar**. A ficha **deve mostrar** o nome.
+3. Em **Cirurgias**, toque em **Todas**. A lista **deve mostrar** o nome na de 8 de setembro. Na busca, escreva `fulana`: **deve aparecer** só ela.
+4. Em **Relatórios → Tabela**, o nome **deve aparecer** embaixo da operação. Em **Relatórios → Relatório do ano**, toque em **Ver cada pagamento**: **deve aparecer** a lista com o nome de cada paciente.
+
+## 8. Lixeira e Desfazer
 
 1. Em **Cirurgias**, abra uma cirurgia e toque em **Excluir cirurgia**. Confirme. **Deve aparecer** o aviso "Cirurgia excluída" com **Desfazer**. Toque em **Desfazer**: ela volta.
 2. Exclua a mesma cirurgia de novo, sem desfazer. Em **Ajustes**, a linha **Lixeira** mostra "1 item". Abra e toque em **Recuperar**: ela volta para a lista.
 3. Em **Ajustes → Conversas do WhatsApp**, **deve aparecer** a conversa trazida, com o botão **Desfazer**. Não toque nele agora.
 
-## 8. Legenda editada, feriados e lembrete
+## 9. Legenda editada, feriados e lembrete
 
 1. Toque em **+ → Conversa do WhatsApp** e escolha `conversa-iphone-editada.txt`. **Deve aparecer** "1 legenda editada", com "Antes: CVL UMC Bruno". Toque em **Trazer para o app**. No "Pronto!", **deve aparecer** "1 legenda editada atualizada".
 2. Em **Cirurgias** continuam 14. A de **20 de setembro** mostra a legenda nova, "CVL UMC Bruno 21h", e embaixo "Editada no WhatsApp. Antes era…".
 3. Em **Ajustes → Feriados da cidade**, **deve aparecer** Carnaval e Corpus Christi, com "Conta" e "Não conta", e o campo com 31/08. Volte sem salvar.
 4. Em **Ajustes → Lembrete no Calendário**, toque em **Criar o lembrete** e salve o arquivo em Arquivos. Abra o arquivo em **Arquivos**. **Deve aparecer** o evento "Controle de Cirurgias: conversa, planilha e backup", todo dia 5, às 19h. Toque em **Adicionar ao Calendário** e confira no Calendário. Depois, se quiser, apague o evento.
 
-## 9. Acabamento de iPhone
+## 10. Acabamento de iPhone
 
 1. Abra uma cirurgia e arraste a barra do topo para baixo. **Deve:** a tela fechar, como em Fechar. Toque no **+** e arraste o menu para baixo: ele também fecha.
 2. No iPhone, abra **Ajustes → Tela e Brilho → Tamanho do Texto** e aumente o tamanho. Volte ao app. **Deve aparecer:** as letras maiores, sem nada cortado. Depois, volte o tamanho ao de antes.
@@ -96,37 +103,37 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 4. Feche a aba do Safari e abra outra vez o endereço com `?teste`. **Deve aparecer:** "Entrar com Face ID" e, embaixo, o campo da senha. Toque em **Entrar com Face ID**: o app abre.
 5. Em **Ajustes → Senha para abrir**, escreva `2468` e toque em **Desligar a senha**. O Face ID desliga junto.
 
-## 10. Fechar e abrir de novo
+## 11. Fechar e abrir de novo
 
 Feche a aba do Safari e abra outra vez o endereço com `?teste`.
 
 **Deve aparecer:** as mesmas 14 cirurgias.
 
-## 11. Fazer backup
+## 12. Fazer backup
 
 Em **Ajustes → Fazer backup**, toque em **Salvar em Arquivos** e salve no iCloud Drive.
 
 **Deve aparecer:** "Backup salvo". Com poucas fotos sai um arquivo só. Com muitas, o app pede para salvar parte por parte, e todas as partes ficam na mesma pasta.
 
-## 12. Apagar e restaurar
+## 13. Apagar e restaurar
 
 1. Em **Ajustes → Apagar os dados de teste**, confirme duas vezes. **Deve aparecer** a tela de boas-vindas, vazia.
 2. Em **Ajustes → Restaurar um backup**, escolha o arquivo do backup (todas as partes juntas, se houver). **Deve aparecer** "Restaurar o backup?" com 14 cirurgias.
 3. Toque em **Restaurar**. **Deve aparecer** "Backup restaurado." e as 14 cirurgias de volta, com as fotos.
 
-## 13. Diagnóstico
+## 14. Diagnóstico
 
 Em **Ajustes → Copiar diagnóstico**, toque em **Copiar** e cole numa conversa.
 
-**Deve aparecer:** a versão do app, "modo de teste" e contagens, sem nenhum nome, procedimento ou valor.
+**Deve aparecer:** a versão do app, "modo de teste" e contagens, sem nenhum nome (nem de paciente), procedimento ou valor.
 
-## 14. Sair do modo de teste
+## 15. Sair do modo de teste
 
 Toque em **Sair do modo de teste**, na faixa amarela.
 
 **Deve aparecer:** o app de verdade, sem nenhuma das 14 cirurgias de teste.
 
-## 15. O app instalado
+## 16. O app instalado
 
 1. Abra pelo ícone. Em Ajustes, no fim, aparece a versão nova. Na primeira abertura depois de uma versão que mexe no banco, o app pode mostrar "Atualizando o app" por alguns segundos.
 2. Ligue o modo avião e abra pelo ícone. O app abre normalmente. Depois desligue o modo avião.
