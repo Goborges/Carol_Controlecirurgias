@@ -47,7 +47,9 @@ Toque em **Editar** e, sem mudar nada, em **Salvar**. **Deve aparecer:** a ficha
 
 ## 4. Trazer a planilha de exemplo
 
-Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`. Escolha a data em que o dinheiro caiu.
+Toque em **+ → Planilha de repasse** e escolha o arquivo `EXEMPLO...xlsx`.
+
+A planilha de exemplo é de setembro, então o app a trata como antiga. Em **Quando esse dinheiro caiu na sua conta?**, **deve aparecer** "Outro dia" marcado, sem data, e o aviso "Planilha antiga: escolha o dia em que esse dinheiro caiu. Está no extrato do banco." Toque em **Confirmar** sem escolher o dia. **Deve aparecer** o aviso "Escolha o dia em que esse dinheiro caiu na conta" e nada é gravado. Depois toque em **Hoje**, para o dinheiro aparecer neste mês no passo 5.
 
 Em **Confirme os nomes**, o app pergunta se Bruno Teixeira Lima, Lia Monteiro Alves e Otavio Prado Reis são a mesma pessoa que Bruno, Lia e Otávio. Deixe **Sim**. Bruno Carvalho Dias aparece como colega novo, porque já há outro Bruno na planilha.
 

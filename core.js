@@ -603,7 +603,12 @@
     executor: ['medico executor', 'executor', 'cirurgiao principal', 'cirurgiao', 'medico responsavel'],
     // só o nome exato da coluna: "Conta paciente" e "Carteira do beneficiário" são números, não o nome
     paciente: ['paciente', 'nome do paciente', 'nome paciente', 'beneficiario', 'nome do beneficiario'],
+    // a médica que recebe o repasse (a mesma em todas as linhas); só o nome exato, para não pegar "Médico executor"
+    medico: ['medico', 'medica', 'medico repasse', 'favorecido'],
   };
+  const SO_NOME_EXATO = new Set(['data', 'valor', 'paciente', 'medico']);
+  const FUNCAO_RE = /auxiliar|cirurgi|anestes|instrument|principal|assistente/i;
+  const CONVENIO_RE = /\b(unimed|saude|plano|amil|fusex|bradesco|sulamerica|cassi|geap|intercambio|seguros?|convenio|particular)\b/;
   /** Lê as linhas do repasse, com o nome do paciente (desde a 1.14). Descarta atendimento e conta. */
   function parseRepasse(rows, fileName) {
     let hi = -1, map = null;
@@ -613,12 +618,32 @@
       for (const [k, names] of Object.entries(HEADERS)) {
         let idx = -1;
         for (const nm of names) { idx = cells.findIndex((c) => c === nm); if (idx >= 0) break; }
-        if (idx < 0 && k !== 'data' && k !== 'valor' && k !== 'paciente') for (const nm of names) { idx = cells.findIndex((c) => c && c.includes(nm) && !c.includes('paciente')); if (idx >= 0) break; }
+        if (idx < 0 && !SO_NOME_EXATO.has(k)) for (const nm of names) { idx = cells.findIndex((c) => c && c.includes(nm) && !c.includes('paciente')); if (idx >= 0) break; }
         if (idx >= 0) m[k] = idx;
       }
       if (m.data != null && m.procedimento != null && m.valor != null) { hi = i; map = m; break; }
     }
     if (hi < 0) throw new Error('Não encontrei as colunas de data, procedimento e valor nesta planilha.');
+    // Conferência pelo conteúdo: há planilhas com o cabeçalho fora do lugar. Na de dez/2025 falta um título antes de
+    // "Função médico": dali em diante, cada título fica uma coluna à esquerda dos dados ("Medico" em cima da categoria do
+    // plano, "Médico executor" em cima da médica, e o colega sem título).
+    const dados = rows.slice(hi + 1).filter((r) => r && excelDate(r[map.data]));
+    const preenchidos = (i) => dados.map((r) => r[i]).filter((v) => v != null && String(v).trim() !== '');
+    // a função é a coluna com "Primeiro Auxiliar", "Cirurgião"...; se o título dela está em cima de números, vale a coluna
+    // do conteúdo, e os títulos dali em diante andam junto com ela. Texto de função com outras palavras fica como está.
+    const ehFuncao = (i) => { const v = preenchidos(i); return v.length > 0 && v.filter((x) => typeof x !== 'number' && FUNCAO_RE.test(String(x))).length >= v.length * 0.8; };
+    const soNumeros = (i) => { const v = preenchidos(i); return v.length > 0 && v.every((x) => typeof x === 'number' || /^[\d.,\s-]+$/.test(String(x))); };
+    if (map.funcao == null || soNumeros(map.funcao)) {
+      const n = Math.max(0, ...dados.map((r) => r.length)); let achou = null;
+      for (let i = 0; i < n && achou == null; i++) if (i !== map.procedimento && ehFuncao(i)) achou = i;
+      if (achou != null && map.funcao != null) {
+        const desde = map.funcao, desvio = achou - map.funcao;
+        for (const k of Object.keys(map)) if (k !== 'funcao' && map[k] >= desde) map[k] += desvio;
+      }
+      map.funcao = achou;
+    }
+    // o colega é uma pessoa: "Médico executor" com nome de convênio ("Unimed...") é coluna lida no lugar errado
+    if (map.executor != null) { const v = preenchidos(map.executor).map((x) => norm(x)); if (v.length && v.filter((x) => CONVENIO_RE.test(x)).length >= v.length / 2) map.executor = null; }
     const lines = [];
     for (let i = hi + 1; i < rows.length; i++) {
       const r = rows[i] || [];
@@ -633,6 +658,9 @@
         exec: map.executor != null && r[map.executor] ? String(r[map.executor]).replace(/\s+/g, ' ').trim() : null,
         paciente: map.paciente != null ? nomeDaPlanilha(r[map.paciente]) : null,
       });
+      // o executor igual à médica da planilha é ela mesma: não é colega
+      const l = lines[lines.length - 1];
+      if (l.exec && map.medico != null && r[map.medico] && norm(l.exec) === norm(r[map.medico])) l.exec = null;
     }
     const name = String(fileName || '');
     const num = (name.match(/repasse\D{0,5}(\d{3,})/i) || [])[1] || null;
@@ -641,6 +669,28 @@
     const sig = lines.map((l) => `${l.date}${l.time}${l.cod}${l.valor}`).join('|');
     let h = 0; for (let i = 0; i < sig.length; i++) h = (h * 31 + sig.charCodeAt(i)) | 0;
     return { id: num ? 'rep' + num : 'rep' + (h >>> 0).toString(36), numero: num, comp, nome: name, lines, total };
+  }
+
+  // ---- planilha antiga (item 39) ----
+  // A competência vem no nome do arquivo ("Comp._12-2025", "Comp._03"). Sem o ano, vale o primeiro mês com esse número a
+  // partir da cirurgia mais nova da planilha: a competência nunca é antes das cirurgias que ela paga. Devolve 'aaaa-mm'.
+  function mesDaCompetencia(comp, ultimaCirurgia) {
+    const m = String(comp || '').match(/^(\d{1,2})(?:\D+(\d{2}|\d{4}))?$/);
+    if (!m || +m[1] < 1 || +m[1] > 12) return null;
+    const mes = +m[1];
+    if (m[2]) return `${m[2].length === 2 ? '20' + m[2] : m[2]}-${pad2(mes)}`;
+    if (!/^\d{4}-\d{2}/.test(ultimaCirurgia || '')) return null;
+    const ano = +ultimaCirurgia.slice(0, 4);
+    return `${mes >= +ultimaCirurgia.slice(5, 7) ? ano : ano + 1}-${pad2(mes)}`;
+  }
+  /** Planilha antiga: o dinheiro dela não caiu hoje. O repasse cai no mês da competência ou no seguinte; com a competência
+   *  de dois meses atrás ou mais, a planilha é antiga. Sem a competência no nome, vale a cirurgia mais nova com mais de 100 dias. */
+  function planilhaAntiga(rep, hoje) {
+    const ult = ((rep && rep.lines) || []).reduce((m, l) => (l.date > m ? l.date : m), '');
+    if (!ult) return false;
+    const comp = mesDaCompetencia(rep.comp, ult);
+    if (comp) return (+hoje.slice(0, 4) - +comp.slice(0, 4)) * 12 + (+hoje.slice(5, 7) - +comp.slice(5, 7)) >= 2;
+    return dayNum(hoje) - dayNum(ult) > 100;
   }
 
   // ---------- termos: procedimento do repasse e médico executor ----------
@@ -1206,7 +1256,7 @@
     mapRepasseProc, mapExecutor, groupActs, planRepasse, buildRefs, estimate, urgencyChecks,
     totalRecebido, quitada, situacao, emAberto, migrarFinanceiro, compatFinanceiro, reconciliarFinanceiro, pagarPeloRepasse, desfazerRepasseNaFicha,
     juntarComplementos, prazosDePagamento, prazoDe, limiteAtraso, previsaoRecebimento, lembreteIcs,
-    pagamentosComValor, relatorio, relatorioAnual, anosComPagamento, nomeDaPlanilha, mesmoPaciente,
+    pagamentosComValor, relatorio, relatorioAnual, anosComPagamento, nomeDaPlanilha, mesmoPaciente, mesDaCompetencia, planilhaAntiga,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

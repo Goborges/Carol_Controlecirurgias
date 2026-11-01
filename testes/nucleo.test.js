@@ -341,6 +341,46 @@
       igual([a.recordId, a.difData, a.difValor], ['x', '2026-09-09', 500], 'diferenças');
     });
 
+    // ---------- planilhas reais em outros formatos (item 39) ----------
+    const planilha = (nome) => io.blob(nome).then((b) => C.readXlsx(b)).then((rows) => C.parseRepasse(rows, nome));
+    teste('Planilha de repasse', 'cabeçalho fora do lugar (como a de dez/2025): função, colega e valor pelo conteúdo', async () => {
+      const rep = await planilha('EXEMPLO_LTDA_-_Repasse_-_900003_-_Comp._12-2025.xlsx');
+      igual(rep.lines.map((l) => [l.date, l.valor, l.funcao, l.exec, l.paciente]), [
+        ['2025-10-06', 444.02, 'Primeiro Auxiliar', 'Bruno Teixeira Lima', 'Paciente Fictício 31'], ['2025-10-06', 222.01, 'Primeiro Auxiliar', 'Bruno Teixeira Lima', 'Paciente Fictício 31'],
+        ['2025-10-20', 288.62, 'Segundo Auxiliar', 'Lia Monteiro Alves', 'Paciente Fictício 32'], ['2025-11-03', 577.24, 'Primeiro Auxiliar', 'Otavio Prado Reis', 'Paciente Fictício 33']], 'linhas');
+      igual([rep.total, rep.comp, C.groupActs(rep.lines).length], [1531.89, '12-2025', 3], 'total, competência e atos');
+    });
+    teste('Planilha de repasse', 'sem a coluna do colega (como as de jan, fev e jun/2026): a própria médica não vira colega', async () => {
+      const rep = await planilha('EXEMPLO_LTDA_-_Repasse_-_900004_-_Comp._01.xlsx');
+      igual(rep.lines.map((l) => [l.funcao, l.exec, l.paciente, l.conv]), [['Primeiro Auxiliar', null, 'Paciente Fictício 41', 'Plano Exemplo Saúde'], ['Primeiro Auxiliar', null, 'Paciente Fictício 42', 'Convênio Teste']], 'linhas');
+    });
+    teste('Planilha de repasse', 'o executor igual à médica da planilha é ela mesma: fica sem colega', () => {
+      const rows = [['Data procedimento', 'Procedimento', 'Liberado', 'Função médico', 'Medico', 'Médico executor'], [46267.4, 'COLECISTECTOMIA', 100, 'Cirurgião', 'Ana Exemplo', 'ANA EXEMPLO']];
+      igual(C.parseRepasse(rows, 'x.xlsx').lines[0].exec, null, 'ela mesma');
+    });
+    teste('Planilha de repasse', 'função escrita de outro jeito ("1º Aux") fica como está, sem mexer nas outras colunas', () => {
+      const rows = [['Data procedimento', 'Procedimento', 'Liberado', 'Função médico', 'Medico', 'Médico executor'],
+        [46267.4, 'TRATAMENTO CIRURGICO DE HERNIA', 100, '1º Aux', 'Ana Exemplo', 'Bruno Teixeira Lima'], [46268.4, 'TRATAMENTO CIRURGICO DE CISTO', 80, '1º Aux', 'Ana Exemplo', 'Lia Monteiro Alves']];
+      igual(C.parseRepasse(rows, 'x.xlsx').lines.map((l) => [l.funcao, l.exec]), [['1º Aux', 'Bruno Teixeira Lima'], ['1º Aux', 'Lia Monteiro Alves']], 'função e colega');
+    });
+    teste('Planilha de repasse', '"Médico executor" com nome de convênio é coluna fora do lugar: não vira colega', () => {
+      const rows = [['Data procedimento', 'Procedimento', 'Liberado', 'Função médico', 'Médico executor'],
+        [46267.4, 'COLECISTECTOMIA', 100, 'Primeiro Auxiliar', 'UNIMED INTERCAMBIO'], [46268.4, 'HERNIORRAFIA', 80, 'Primeiro Auxiliar', 'PLANO EXEMPLO SAÚDE']];
+      igual(C.parseRepasse(rows, 'x.xlsx').lines.map((l) => l.exec), [null, null], 'sem colega');
+    });
+    teste('Planilha de repasse', 'o mês da competência: com o ano no nome, ou o primeiro a partir da cirurgia mais nova', () => {
+      igual([C.mesDaCompetencia('12-2025', '2025-11-29'), C.mesDaCompetencia('01', '2026-01-20'), C.mesDaCompetencia('06', '2026-02-07'),
+        C.mesDaCompetencia('01', '2025-12-15'), C.mesDaCompetencia('03/26', '2026-03-01'), C.mesDaCompetencia('13', '2026-01-01'), C.mesDaCompetencia(null, '2026-01-01'), C.mesDaCompetencia('05', '')],
+      ['2025-12', '2026-01', '2026-06', '2026-01', '2026-03', null, null, null], 'competências');
+    });
+    teste('Planilha de repasse', 'planilha antiga: competência de dois meses atrás ou mais; sem competência, cirurgia com mais de 100 dias', () => {
+      const rep = (comp, ...datas) => ({ comp, lines: datas.map((date) => ({ date, valor: 100 })) });
+      igual([C.planilhaAntiga(rep('09', '2026-09-02', '2026-09-23'), '2026-10-05'), C.planilhaAntiga(rep('09', '2026-09-23'), '2026-11-01'),
+        C.planilhaAntiga(rep('10', '2026-09-23'), '2026-11-01'), C.planilhaAntiga(rep('12-2025', '2025-11-29'), '2026-11-01'),
+        C.planilhaAntiga(rep(null, '2026-10-01'), '2026-11-01'), C.planilhaAntiga(rep(null, '2026-06-01'), '2026-11-01'), C.planilhaAntiga(rep('09'), '2026-11-01')],
+      [false, true, false, true, false, true, false], 'antiga?');
+    });
+
     // ---------- nome do paciente (item 38) ----------
     teste('Paciente', 'a planilha traz o nome do paciente de cada linha, sem confundir com a conta do paciente', async () => {
       const rep = await repasse();
