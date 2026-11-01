@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.14';
+  const VERSION = '1.15';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -422,13 +422,16 @@
   const isLate = (r) => isOpen(r) && daysSince(r.date) > C.limiteAtraso(r, S.prazos || new Map(), S.settings.alertDias);
   // o que falta no cadastro: avisos da importação + procedimento, hospital ou colega em branco.
   // "Está tudo certo" (conferido) cala os campos em branco; quem marcou "sem cobrança" não é cobrada disso.
+  // A cirurgia que a planilha trouxe sem dizer o colega (planilha sem essa coluna, ou ela mesma operou) não cobra "Sem colega":
+  // não há de onde tirar. Se quiser, ela põe o colega na ficha.
+  const semColegaNaPlanilha = (r) => !!r.repCriador && (r.rep || []).length > 0 && !(r.rep || []).some((l) => l.exec);
   function pendencias(r) {
     if (r.status === 'semcobranca') return [];
     const out = [...(r.revisar || [])];
     if (!r.conferido) {
       if (!(r.procs || []).length && !out.includes('Sem procedimento')) out.push('Sem procedimento');
       if (!r.hosp) out.push('Sem hospital');
-      if (!(r.cols || []).length) out.push('Sem colega');
+      if (!(r.cols || []).length && !semColegaNaPlanilha(r)) out.push('Sem colega');
     }
     return out;
   }
@@ -2145,7 +2148,11 @@
     clearDemo();
     for (const s of sheets.slice()) s.close(true);
     const hosps = uniq([...usedValues('hosp'), ...namesOf('hosp')]);
-    const st = { step: S.repasses.some((x) => x.id === rep.id) ? 'repetido' : 'plano', hosp: S.settings.hospRepasse || (hosps.includes('UMC') ? 'UMC' : hosps[0] || ''), quando: 'hoje', pay: today(), over: new Map(), ligar: new Map(), separar: new Set(), mesmo: new Map(), caiu: null };
+    // planilha antiga (item 39): o dinheiro não caiu hoje. Começa em "Outro dia", sem data, e só confirma com o dia escolhido.
+    const antiga = C.planilhaAntiga(rep, today());
+    // a cirurgia mais nova da planilha (uma data no futuro seria erro da planilha: aí não limita o dia)
+    const ultimaCirurgia = ((u) => (u <= today() ? u : ''))(rep.lines.reduce((m, l) => (l.date > m ? l.date : m), ''));
+    const st = { step: S.repasses.some((x) => x.id === rep.id) ? 'repetido' : 'plano', hosp: S.settings.hospRepasse || (hosps.includes('UMC') ? 'UMC' : hosps[0] || ''), quando: antiga ? 'outro' : 'hoje', pay: antiga ? '' : today(), over: new Map(), ligar: new Map(), separar: new Set(), mesmo: new Map(), caiu: null };
     const execs = uniq(rep.lines.map((l) => l.exec));
     const colNames = namesOf('col');
     // nome completo com o mesmo primeiro nome de um colega: pergunta. Se o colega já tem outro nome completo, o app parte
@@ -2185,14 +2192,14 @@
               for (const [r, n] of nomes) { r.paciente = n; r.pacienteDaPlanilha = rep.id; r.rep = (r.rep || []).map((l) => (l.repId === rep.id && !l.paciente ? { ...l, paciente: n } : l)); await saveRecord(r, { sistema: true }); }
               derive(); render(); api.close(true); toast(plural(nomes.length, 'cirurgia ganhou o nome do paciente.', 'cirurgias ganharam o nome do paciente.'));
             } }, 'Trazer os nomes') : null,
-            h('button', { class: nomes.length ? 'btn' : 'btn primary', type: 'button', onclick: async () => { await undoRepasse(old, false); replan(); st.step = 'plano'; api.update(); } }, 'Abrir de novo')].filter(Boolean) };
+            h('button', { class: nomes.length ? 'btn' : 'btn primary', type: 'button', onclick: async () => { await undoRepasse(old, false); if (old.pay) { st.pay = old.pay; st.quando = old.pay === today() ? 'hoje' : 'outro'; } replan(); st.step = 'plano'; api.update(); } }, 'Abrir de novo')].filter(Boolean) };
       }
       if (st.step === 'pronto') {
-        return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${brl(rep.total)} registrados.`),
+        return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Pronto!'), h('p', null, `${brl(rep.total)} registrados${st.pay && st.pay !== today() ? `, como recebidos em ${ddmmyyyy(st.pay)}` : ''}.`),
           h('p', null, cap(frase([st.res.matched ? plural(st.res.matched, 'cirurgia do WhatsApp ficou paga', 'cirurgias do WhatsApp ficaram pagas') : null,
             st.res.complementos ? plural(st.res.complementos, 'complemento somado a uma cirurgia já paga', 'complementos somados a cirurgias já pagas') : null,
             st.res.mesmos ? plural(st.res.mesmos, 'pagamento que você tinha registrado agora consta da planilha', 'pagamentos que você tinha registrado agora constam da planilha') : null,
-            st.res.created ? `${plural(st.res.created, 'cirurgia nova', 'cirurgias novas')}, que não estavam no WhatsApp` : null])) + '.'),
+            st.res.created ? `${plural(st.res.created, 'cirurgia nova, que não estava', 'cirurgias novas, que não estavam')} no WhatsApp` : null])) + '.'),
           st.res.dif ? h('p', { class: 'note' }, st.res.dif) : null),
           !PREVIEW ? tip('Faça um backup agora', ' Assim os pagamentos desta planilha ficam guardados fora do iPhone.', 'Fazer backup', () => { api.close(true); exportBackup(); }, 'share') : null],
           foot: h('button', { class: 'btn primary', type: 'button', onclick: () => { api.close(true); go('lista', { status: 'recebido' }); } }, 'Ver cirurgias pagas') };
@@ -2204,7 +2211,7 @@
       const conferir = assoc.filter((a) => a.certeza !== 'manual' && (a.certeza === 'confira' || a.certeza === 'complemento' || a.outras.length || a.difData || a.difValor != null || a.difPaciente));
       const seguras = assoc.filter((a) => !conferir.includes(a));
       const doubtful = execs.filter((ex) => { const o = st.over.get(ex); return o.how === 'parecido' || o.how === 'primeiro-nome' || o.how === 'novo' || o.forced; });
-      const payIn = h('input', { type: 'date', value: st.pay, 'aria-label': 'Dia em que o dinheiro caiu', oninput: (e) => { st.pay = e.target.value; } });
+      const payIn = h('input', { id: 'rep-pay', type: 'date', value: st.pay, min: ultimaCirurgia || null, max: today(), 'aria-label': 'Dia em que o dinheiro caiu', oninput: (e) => { st.pay = e.target.value; }, onchange: (e) => { st.pay = e.target.value; } });
       const difTxt = () => { const d = st.caiu != null ? C.round2(rep.total - st.caiu) : null;
         return d == null ? 'Opcional. Com ele, o "Recebido no mês" bate com o extrato do banco.' : Math.abs(d) < 0.005 ? 'Igual ao liberado na planilha.' : d > 0 ? `${brl(d)} a menos que o liberado: retenções e taxas.` : `${brl(-d)} a mais que o liberado.`; };
       const difEl = h('small', { id: 'rep-caiu-dif' }, difTxt());
@@ -2249,8 +2256,9 @@
       const body = [
         h('div', null, h('h1', { class: 'bigtitle' }, brl(rep.total)), h('p', { class: 'muted', style: 'margin-top:6px' }, [plural(rep.lines.length, 'linha', 'linhas') + ' na planilha', rep.numero ? 'repasse nº ' + rep.numero : null, compName(rep.comp) || null].filter(Boolean).join(', '))),
         h('div', { class: 'group' },
-          h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quando esse dinheiro caiu na sua conta?', h('small', null, 'Nas planilhas antigas, escolha o dia certo.')),
-            seg([['hoje', 'Hoje'], ['outro', 'Outro dia']], st.quando, (v) => { st.quando = v; if (v === 'hoje') st.pay = today(); api.update(); }, 'Quando'), st.quando === 'outro' ? payIn : null),
+          h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quando esse dinheiro caiu na sua conta?',
+            antiga ? h('small', { id: 'rep-antiga', class: 'warn-txt' }, 'Planilha antiga: escolha o dia em que esse dinheiro caiu. Está no extrato do banco.') : h('small', null, 'Nas planilhas antigas, escolha o dia certo.')),
+            seg([['hoje', 'Hoje'], ['outro', 'Outro dia']], st.quando, (v) => { st.quando = v; if (v === 'hoje') st.pay = today(); else if (antiga && st.pay === today()) st.pay = ''; api.update(); }, 'Quando'), st.quando === 'outro' ? payIn : null),
           h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quanto caiu na conta?', difEl), caiuIn),
           h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'De qual hospital é a planilha?'),
             h('div', { class: 'qchips' }, [...hosps.slice(0, 5), ''].map((x) => h('button', { class: 'qchip', type: 'button', 'aria-pressed': String(st.hosp === x), onclick: () => { st.hosp = x; replan(); api.update(); } }, x || 'Não sei'))))),
@@ -2269,6 +2277,13 @@
     } });
     async function apply(api) {
       if (st.quando === 'hoje') st.pay = today();
+      else {
+        // o dia em que caiu: escolhido, que já passou e não antes da cirurgia mais nova da planilha
+        const erro = !st.pay ? 'Escolha o dia em que esse dinheiro caiu na conta. Está no extrato do banco.'
+          : st.pay > today() ? 'Esse dia ainda não chegou. Escolha o dia em que o dinheiro caiu na conta.'
+            : ultimaCirurgia && st.pay < ultimaCirurgia ? `O dinheiro não pode ter caído antes da cirurgia de ${ddmmyyyy(ultimaCirurgia)}. Confira o dia.` : null;
+        if (erro) { toast(erro); const el = document.getElementById('rep-pay'); if (el) el.focus(); return; }
+      }
       const termsAdd = [], termsUpd = [];
       for (const [ex, o] of st.over) {
         const n = C.norm(ex);

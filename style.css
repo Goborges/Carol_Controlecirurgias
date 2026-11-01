@@ -336,6 +336,7 @@ input[type="date"], input[type="time"] { -webkit-appearance: none; appearance: n
 .qrow { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; position: relative; }
 .qrow .q { font-weight: 600; }
 .qrow .q small { display: block; font-weight: 400; color: var(--muted); font-size: 0.875rem; margin-top: 2px; }
+.qrow .q small.warn-txt { color: var(--warn); }
 .progress { height: 8px; border-radius: 99px; background: var(--fill); overflow: hidden; }
 .progress span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
 
