@@ -629,6 +629,40 @@
       igual(C.lembreteIcs({ dia: 30, hora: '7:5', hoje: '2026-10-03' }).match(/DTSTART:(\S+)/)[1], '20261028T070500', 'dia até 28, hora completada');
     });
 
+    // ---------- texto de cobrança (item 40) ----------
+    const aCobrar = (date, procs, o) => ({ id: 'c' + date, date, procs, pagamentos: [], status: 'aberto', ...o });
+    const tresAbertas = () => [
+      aCobrar('2025-10-20', ['Apendicectomia'], { devido: 288.62, devidoOrigem: 'repasse', pagamentos: [{ valor: 168.62, data: '2025-12-01', origem: 'manual', parcial: true }], paciente: 'Paciente Fictício 32' }),
+      aCobrar('2025-10-06', ['Colecistectomia videolaparoscópica'], { devido: 1444.02, devidoOrigem: 'combinado', paciente: 'Paciente Fictício 31', conv: 'Plano Exemplo Saúde' }),
+      aCobrar('2025-11-03', ['Herniorrafia inguinal'], { paciente: 'Paciente Fictício 33' })];
+    const dadosExemplo = { titular: 'Fulana Exemplo Serviços Médicos Ltda', documento: '00000000000100', banco: 'Banco Exemplo', agencia: '0001', conta: '12345-6', pix: 'fulana@exemplo.com' };
+    teste('Cobrança', 'cada cirurgia com data, procedimento, paciente, convênio e o que falta; o total; da mais antiga para a mais nova', () => {
+      const t = C.textoCobranca(tresAbertas(), { hosp: 'Hospital Exemplo', comPaciente: true }).split('\n');
+      igual(t.slice(0, 5), ['Honorários médicos em aberto – Hospital Exemplo', '', 'Prezados(as),', '', 'Segue o levantamento das cirurgias em que participei e cujos honorários ainda estão em aberto:'], 'começo');
+      igual(t.slice(6, 12), ['1. 06/10/2025 – Colecistectomia videolaparoscópica', '   Paciente: Paciente Fictício 31 · Convênio: Plano Exemplo Saúde · Valor: R$ 1.444,02',
+        '2. 20/10/2025 – Apendicectomia', '   Paciente: Paciente Fictício 32 · Valor em aberto: R$ 120,00 (de R$ 288,62)',
+        '3. 03/11/2025 – Herniorrafia inguinal', '   Paciente: Paciente Fictício 33 · Valor: a confirmar'], 'cirurgias');
+      verdade(t.includes('Total em aberto: R$ 1.564,02, mais 1 cirurgia com valor a confirmar.'), 'o total só com os valores definidos');
+      verdade(!t.includes('Dados para pagamento:') && t[t.length - 1] === 'Atenciosamente,', 'sem dados bancários, termina em "Atenciosamente,"');
+    });
+    teste('Cobrança', 'sem o nome do paciente, quando ela escolhe; só atrasadas muda a frase; valores a confirmar no total', () => {
+      const t = C.textoCobranca(tresAbertas(), { hosp: 'Hospital Exemplo', comPaciente: false, atrasadas: true });
+      verdade(!t.includes('Paciente') && t.includes('já passado o prazo habitual de pagamento:'), 'sem paciente e com a frase das atrasadas');
+      const semValor = [aCobrar('2026-01-10', ['Hernioplastia']), aCobrar('2026-01-12', [], { pagamentos: [{ valor: 100, data: '2026-02-01', origem: 'manual', parcial: true }], status: 'aberto' })];
+      const t2 = C.textoCobranca(semValor, {}).split('\n');
+      verdade(t2[0] === 'Honorários médicos em aberto' && t2.includes('2. 12/01/2026 – Procedimento não informado') && t2.includes('   Valor: a confirmar (já recebido: R$ 100,00)'), 'sem hospital, sem procedimento e parcial sem valor devido');
+      verdade(t2.includes('Ao todo, 2 cirurgias, com os valores a confirmar.'), 'todas a confirmar');
+      verdade(!C.textoCobranca([semValor[0]], {}).includes('Total'), 'uma cirurgia só: sem linha de total');
+    });
+    teste('Cobrança', 'os dados para pagamento e a assinatura no fim; CPF e CNPJ só com números ganham os pontos', () => {
+      const t = C.textoCobranca(tresAbertas(), { hosp: 'Hospital Exemplo', dados: dadosExemplo, assinatura: ' Dra. Fulana Exemplo \n\n CRM-MG 00000 ' }).split('\n');
+      igual(t.slice(t.indexOf('Dados para pagamento:')), ['Dados para pagamento:', 'Titular: Fulana Exemplo Serviços Médicos Ltda', 'CNPJ: 00.000.000/0001-00', 'Banco: Banco Exemplo', 'Agência: 0001 · Conta: 12345-6',
+        'Chave PIX: fulana@exemplo.com', '', 'Fico à disposição para qualquer esclarecimento.', '', 'Atenciosamente,', 'Dra. Fulana Exemplo', 'CRM-MG 00000'], 'fim do texto');
+      igual([C.documentoFormatado('00000000191'), C.documentoFormatado('000.000.001-91'), C.documentoFormatado('123')], [{ tipo: 'CPF', txt: '000.000.001-91' }, { tipo: 'CPF', txt: '000.000.001-91' }, { tipo: 'CPF/CNPJ', txt: '123' }], 'documento');
+      const soPix = C.textoCobranca(tresAbertas(), { dados: { pix: 'fulana@exemplo.com', conta: '12345-6' } }).split('\n');
+      verdade(soPix.includes('Conta: 12345-6') && soPix.includes('Chave PIX: fulana@exemplo.com') && !soPix.some((l) => l.startsWith('Titular')), 'só o que foi preenchido');
+    });
+
     // ---------- estimativa ----------
     const idxE = indice();
     const linha = (date, time, procName, valor, extra) => ({ date, time, valor, conv: 'Plano Exemplo Saúde', cod: '', proc: procName.toUpperCase(), procName, fam: C.famOf(idxE, procName), funcao: 'Primeiro Auxiliar', exec: 'Bruno Teixeira Lima', ...(extra || {}) });

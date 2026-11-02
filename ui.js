@@ -3,7 +3,7 @@
   'use strict';
   const C = window.Core;
   const PREVIEW = window.APP_MODE === 'preview';
-  const VERSION = '1.15';
+  const VERSION = '1.16';
   const TERMS_VERSION = 1;
   // Modo de teste: o mesmo endereço com ?teste usa outro banco, separado do app de verdade.
   const TESTE = !PREVIEW && /(?:^|[?&])teste(?:[=&]|$)/.test(location.search);
@@ -1046,6 +1046,7 @@
       rowBtn('trash', '', 'Lixeira', S.trash.length ? `${plural(S.trash.length, 'item', 'itens')} dos últimos ${LIXEIRA_DIAS} dias` : 'Vazia', () => sheetLixeira())]));
     out.push(sec('Preferências', [
       rowBtn('user', 'plain', 'Seu nome', S.settings.nome || 'Para o app te cumprimentar', async () => { const v = await formDialog({ title: 'Seu nome', fields: [{ id: 'n', label: 'Como você quer ser chamada', value: S.settings.nome }] }); if (v) { S.settings.nome = v.n.trim(); await saveSettings(); render(); } }),
+      rowBtn('building', 'accent', 'Dados para cobrança', resumoDadosCobranca() || 'Assinatura e dados bancários do texto de cobrança', () => sheetDadosCobranca()),
       rowBtn('clock', 'danger', 'Aviso de atraso', `Pelo prazo de costume de quem paga. Sem histórico, depois de ${S.settings.alertDias} dias`, async () => {
         const v = await formDialog({ title: 'Aviso de atraso', text: 'Com histórico, o app usa o prazo de costume de cada hospital, convênio ou colega. Sem histórico, depois de quantos dias sem pagamento a cirurgia aparece como atrasada?', fields: [{ id: 'd', label: 'Dias', type: 'number', inputmode: 'numeric', value: S.settings.alertDias }] });
         if (v && +v.d > 0) { S.settings.alertDias = Math.round(+v.d); await saveSettings(); render(); }
@@ -1072,6 +1073,7 @@
     out.push(h('div', { class: 'group' },
       rowBtn('cash', 'accent', 'A receber', aReceber, m.open ? () => go('lista', { status: 'aberto' }) : null, h('span', { class: 'v' }, total)),
       rowBtn('check', 'ok', 'Recebido em ' + MES_LONGO[+today().slice(5, 7) - 1], 'o que caiu na conta neste mês', null, h('span', { class: 'v' }, brl0(m.recMes)))));
+    if (m.open) out.push(h('div', { class: 'group' }, rowBtn('chat', 'accent', 'Texto de cobrança', 'As cirurgias em aberto de cada hospital, num texto pronto para mandar', () => sheetCobranca())));
     const prev = previsao(); if (prev) out.push(prev);
     const lista = (id, titulo, nota, rs, filtro) => h('section', { class: 'sec', id }, secTitle(titulo, rs.length > 5 && filtro ? h('button', { type: 'button', onclick: () => go('lista', { status: filtro }) }, 'Ver todas') : null),
       nota ? h('p', { class: 'note' }, nota) : null, h('div', { class: 'group' }, rs.slice(0, 5).map((r) => recordItem(r, (x) => sheetRecord(x)))));
@@ -1118,6 +1120,84 @@
     const nota = ['Pelo prazo de costume de cada hospital, convênio ou colega.',
       p.semPrazo.n ? `${plural(p.semPrazo.n, 'cirurgia fica', 'cirurgias ficam')} sem previsão: quem paga ainda não tem histórico.` : null].filter(Boolean).join(' ');
     return h('section', { class: 'sec', id: 'sec-previsao' }, secTitle('Quando deve cair'), h('p', { class: 'note' }, nota), h('div', { class: 'group flat' }, linhas));
+  }
+  // ---- texto de cobrança (item 40) ----
+  // As cirurgias em aberto de um hospital num texto formal, com os dados para pagamento e a assinatura que ela guarda em
+  // Ajustes. O texto sai só quando ela copia ou compartilha.
+  const dadosCobranca = () => S.settings.cobranca || {};
+  const CAMPOS_COBRANCA = ['assinatura', 'titular', 'documento', 'banco', 'agencia', 'conta', 'pix'];
+  // o que está preenchido, em três partes: assinatura, conta (titular, documento, banco, agência e conta) e PIX
+  function resumoDadosCobranca() {
+    const d = dadosCobranca();
+    const tem = [d.assinatura ? 'assinatura' : null, d.titular || d.documento || d.banco || d.agencia || d.conta ? 'conta' : null, d.pix ? 'PIX' : null].filter(Boolean);
+    return tem.length ? cap(tem.length > 1 ? tem.slice(0, -1).join(', ') + ' e ' + tem[tem.length - 1] : tem[0]) : '';
+  }
+  const temDadosBancarios = () => { const d = dadosCobranca(); return !!(d.pix || d.conta); };
+  function sheetDadosCobranca(depois) {
+    const d = { assinatura: '', titular: '', documento: '', banco: '', agencia: '', conta: '', pix: '', ...dadosCobranca() };
+    const inp = (k, label, ph, hint) => field(label, h('input', { id: 'cob-' + k, type: 'text', value: d[k], placeholder: ph || null, autocomplete: 'off', oninput: (e) => { d[k] = e.target.value; } }), hint);
+    const api = openSheet({ title: 'Dados para cobrança', back: true, onClose: () => { if (depois) depois(); }, render() {
+      const ass = h('textarea', { id: 'cob-assinatura', rows: 3, placeholder: 'Dra. Fulana de Tal\nCRM-MG 00000', value: d.assinatura, oninput: (e) => { d.assinatura = e.target.value; } });
+      return { body: [
+        h('p', { class: 'note' }, 'Entram no fim de todo texto de cobrança. Ficam só neste iPhone e no backup.'),
+        h('form', { class: 'form', onsubmit: (e) => e.preventDefault() },
+          field('Assinatura', ass, 'Seu nome e o CRM, do jeito que vão no fim do texto.'),
+          inp('titular', 'Titular da conta', 'Nome ou razão social'),
+          inp('documento', 'CPF ou CNPJ'),
+          inp('banco', 'Banco', 'Nome ou número do banco'),
+          h('div', { class: 'grid2' }, inp('agencia', 'Agência'), inp('conta', 'Conta')),
+          inp('pix', 'Chave PIX', 'CPF, CNPJ, e-mail, telefone ou chave aleatória'))],
+        foot: h('button', { class: 'btn primary', type: 'button', id: 'cob-salvar', onclick: async () => {
+          const limpo = {};
+          for (const k of CAMPOS_COBRANCA) { const t = String(d[k] || '').trim(); if (t) limpo[k] = k === 'assinatura' ? t.split('\n').map((x) => x.trim()).filter(Boolean).join('\n') : t.replace(/\s+/g, ' '); }
+          S.settings.cobranca = limpo; await saveSettings(); render(); api.close(true); toast('Dados para cobrança salvos.');
+        } }, 'Salvar') };
+    } });
+    return api;
+  }
+  function copiarTexto(texto, campo) {
+    const manual = () => { const el = campo && $(campo); if (el) { el.focus(); el.select(); } toast('Toque e segure no texto para copiar.'); };
+    try { navigator.clipboard.writeText(texto).then(() => toast('Texto copiado. É só colar no WhatsApp ou no e-mail.'), manual); } catch (e) { manual(); }
+  }
+  async function compartilharTexto(texto, campo) {
+    if (navigator.share) {
+      try { await navigator.share({ text: texto }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    copiarTexto(texto, campo);
+  }
+  function sheetCobranca() {
+    const st = { hosp: null, comPaciente: true, atrasadas: false, texto: '' };
+    // um grupo por hospital (as sem hospital no fim), do que tem mais cirurgias em aberto para o que tem menos
+    const grupos = () => {
+      const m = new Map(); for (const r of S.records.filter(isOpen)) { const k = r.hosp || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+      return [...m.entries()].sort((a, b) => (a[0] ? 0 : 1) - (b[0] ? 0 : 1) || b[1].length - a[1].length || a[0].localeCompare(b[0]));
+    };
+    return openSheet({ title: 'Texto de cobrança', back: true, render(api) {
+      const gs = grupos();
+      if (!gs.length) return { body: [h('div', { class: 'empty' }, h('span', { class: 'halo' }, icon('check')), h('h2', null, 'Nada em aberto'), h('p', null, 'Todas as cirurgias estão pagas.'))] };
+      if (st.hosp == null || !gs.some(([k]) => k === st.hosp)) st.hosp = gs[0][0];
+      const todas = gs.find(([k]) => k === st.hosp)[1];
+      const lista = st.atrasadas ? todas.filter(isLate) : todas;
+      const d = dadosCobranca();
+      st.texto = lista.length ? C.textoCobranca(lista, { hosp: st.hosp || null, comPaciente: st.comPaciente, atrasadas: st.atrasadas, dados: d, assinatura: d.assinatura || '' }) : '';
+      const editar = () => sheetDadosCobranca(() => api.update());
+      return { body: [
+        h('p', { class: 'note' }, 'As cirurgias em aberto do hospital escolhido, num texto pronto para mandar. Dá para mudar o texto antes de copiar.'),
+        h('div', { class: 'group' },
+          h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'De qual hospital?'),
+            h('div', { class: 'qchips', id: 'cob-hosp' }, gs.map(([k, rs]) => h('button', { class: 'qchip', type: 'button', 'aria-pressed': String(st.hosp === k), onclick: () => { st.hosp = k; api.update(); } }, `${k || 'Sem hospital'} (${rs.length})`)))),
+          h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Quais cirurgias?'),
+            seg([[false, 'Todas em aberto'], [true, 'Só as atrasadas']], st.atrasadas, (v) => { st.atrasadas = v; api.update(); }, 'Quais cirurgias')),
+          h('div', { class: 'qrow' }, h('div', { class: 'q' }, 'Nome do paciente'),
+            seg([[true, 'Incluir'], [false, 'Não incluir']], st.comPaciente, (v) => { st.comPaciente = v; api.update(); }, 'Nome do paciente'))),
+        !temDadosBancarios() ? tip('Faltam seus dados para recebimento', ' Preencha uma vez: a conta, o PIX e a assinatura entram em todo texto de cobrança.', 'Preencher', editar, 'building', 'warn') : null,
+        // alto o bastante para o texto inteiro: quem rola é a tela, não a caixa
+        lista.length ? h('textarea', { id: 'cob-texto', class: 'cob', rows: Math.min(80, st.texto.split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 36)), 1)), 'aria-label': 'Texto de cobrança', value: st.texto, oninput: (e) => { st.texto = e.target.value; } })
+          : h('p', { class: 'note', id: 'cob-nenhuma' }, 'Nenhuma cirurgia atrasada neste hospital.'),
+        temDadosBancarios() ? h('button', { class: 'link', type: 'button', onclick: editar }, 'Mudar os dados para recebimento') : null],
+        foot: lista.length ? [h('button', { class: 'btn', type: 'button', id: 'cob-copiar', onclick: () => copiarTexto(st.texto, '#cob-texto') }, 'Copiar'),
+          h('button', { class: 'btn primary', type: 'button', id: 'cob-compartilhar', onclick: () => compartilharTexto(st.texto, '#cob-texto') }, icon('share'), 'Compartilhar')] : null };
+    } });
   }
   // ---- lembrete mensal no Calendário (item 33) ----
   function sheetLembrete() {
@@ -2600,6 +2680,7 @@
       `Cópias guardadas antes de migrações: ${copias || 'nenhuma'}`,
       `Último backup: ${S.settings.lastBackup ? ddmmyyyy(S.settings.lastBackup) : 'nunca'}`,
       `Senha para abrir: ${S.settings.pinHash ? 'ligada' : 'desligada'}`,
+      `Dados para cobrança: ${resumoDadosCobranca() ? 'preenchidos' : 'vazios'}`,
       `Uso sem internet: ${sw}`,
       `Aparelho: ${navigator.userAgent}`,
       `Tela: ${screen.width}×${screen.height}, ${window.devicePixelRatio || 1}x`,
