@@ -490,3 +490,6 @@ textarea.diag { font: .8125rem/1.45 ui-monospace, SFMono-Regular, Menlo, monospa
   #print-area .lista thead { display: table-header-group; }
   #print-area .lista tr { break-inside: avoid; }
 }
+
+/* texto de cobrança (item 40): o texto que ela manda, na fonte normal */
+textarea.cob { min-height: 200px; font-size: 0.9375rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }

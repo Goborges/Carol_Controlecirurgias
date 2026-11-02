@@ -1165,6 +1165,52 @@
   /** Anos com pagamento, do mais novo para o mais antigo. */
   const anosComPagamento = (records) => [...new Set(records.flatMap((r) => (r.pagamentos || []).filter((p) => p.valor != null && p.data).map((p) => p.data.slice(0, 4))))].sort().reverse();
 
+  // ---------- texto de cobrança (item 40) ----------
+  const reais = (v) => { const [i, d] = Math.abs(round2(v)).toFixed(2).split('.'); return (v < 0 ? '-' : '') + 'R$ ' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d; };
+  const dataBR = (s) => `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`;
+  /** Quanto falta numa cirurgia em aberto. falta null: o valor devido ainda não foi definido (valor a confirmar). */
+  function faltaReceber(r) {
+    const recebido = totalRecebido(r); const devido = r.devido != null ? r.devido : null;
+    return { devido, recebido, falta: devido != null ? round2(Math.max(0, devido - recebido)) : null };
+  }
+  /** CPF ou CNPJ escrito só com números ganha os pontos; escrito de outro jeito, fica como está. */
+  function documentoFormatado(doc) {
+    const t = String(doc || '').trim(); const n = t.replace(/\D/g, '');
+    if (/^\d+$/.test(t) && n.length === 11) return { tipo: 'CPF', txt: n.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4') };
+    if (/^\d+$/.test(t) && n.length === 14) return { tipo: 'CNPJ', txt: n.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') };
+    return { tipo: n.length === 11 ? 'CPF' : n.length === 14 ? 'CNPJ' : 'CPF/CNPJ', txt: t };
+  }
+  /** Texto de cobrança das cirurgias em aberto de um hospital, da mais antiga para a mais nova: cada uma com data,
+   *  procedimento, paciente (se comPaciente), convênio e o valor que falta (ou "a confirmar"), o total, os dados para
+   *  pagamento e a assinatura. o: { hosp, comPaciente, atrasadas, dados: { titular, documento, banco, agencia, conta, pix }, assinatura }. */
+  function textoCobranca(records, o) {
+    o = o || {};
+    const rs = [...records].sort((a, b) => a.date.localeCompare(b.date) || String(a.time || '').localeCompare(String(b.time || '')));
+    const L = ['Honorários médicos em aberto' + (o.hosp ? ' – ' + o.hosp : ''), '', 'Prezados(as),', '',
+      o.atrasadas ? 'Segue o levantamento das cirurgias em que participei e cujos honorários seguem em aberto, já passado o prazo habitual de pagamento:'
+        : 'Segue o levantamento das cirurgias em que participei e cujos honorários ainda estão em aberto:', ''];
+    let total = 0, semValor = 0;
+    rs.forEach((r, i) => {
+      const f = faltaReceber(r); const partes = [];
+      if (o.comPaciente && r.paciente) partes.push('Paciente: ' + r.paciente);
+      if (r.conv) partes.push('Convênio: ' + r.conv);
+      if (f.falta == null) { semValor++; partes.push('Valor: a confirmar' + (f.recebido > 0 ? ` (já recebido: ${reais(f.recebido)})` : '')); }
+      else { total = round2(total + f.falta); partes.push(f.recebido > 0 ? `Valor em aberto: ${reais(f.falta)} (de ${reais(f.devido)})` : 'Valor: ' + reais(f.falta)); }
+      L.push(`${i + 1}. ${dataBR(r.date)} – ${r.procs && r.procs.length ? r.procs.join(' + ') : 'Procedimento não informado'}`, '   ' + partes.join(' · '));
+    });
+    if (rs.length > 1) L.push('', semValor === rs.length ? `Ao todo, ${rs.length} cirurgias, com os valores a confirmar.`
+      : `Total em aberto: ${reais(total)}` + (semValor ? `, mais ${semValor === 1 ? '1 cirurgia' : semValor + ' cirurgias'} com valor a confirmar.` : '.'));
+    L.push('', 'Peço, por gentileza, a conferência e a programação do pagamento.');
+    const d = o.dados || {}; const doc = d.documento ? documentoFormatado(d.documento) : null;
+    const banco = [d.titular ? 'Titular: ' + d.titular : null, doc ? `${doc.tipo}: ${doc.txt}` : null, d.banco ? 'Banco: ' + d.banco : null,
+      [d.agencia ? 'Agência: ' + d.agencia : null, d.conta ? 'Conta: ' + d.conta : null].filter(Boolean).join(' · ') || null,
+      d.pix ? 'Chave PIX: ' + d.pix : null].filter(Boolean);
+    if (banco.length) L.push('', 'Dados para pagamento:', ...banco);
+    L.push('', 'Fico à disposição para qualquer esclarecimento.', '', 'Atenciosamente,');
+    if (o.assinatura) L.push(...String(o.assinatura).split('\n').map((x) => x.trim()).filter(Boolean));
+    return L.join('\n');
+  }
+
   // ---------- lembrete mensal (arquivo de calendário) ----------
   /** Evento que se repete todo mês no dia escolhido, com o ritual do app. Hora local (o Calendário usa o fuso do iPhone).
    *  o: { dia: 1..28, hora: 'HH:MM', hoje: 'AAAA-MM-DD', agora: Date } */
@@ -1257,6 +1303,7 @@
     totalRecebido, quitada, situacao, emAberto, migrarFinanceiro, compatFinanceiro, reconciliarFinanceiro, pagarPeloRepasse, desfazerRepasseNaFicha,
     juntarComplementos, prazosDePagamento, prazoDe, limiteAtraso, previsaoRecebimento, lembreteIcs,
     pagamentosComValor, relatorio, relatorioAnual, anosComPagamento, nomeDaPlanilha, mesmoPaciente, mesDaCompetencia, planilhaAntiga,
+    faltaReceber, documentoFormatado, textoCobranca,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.Core = api;
 })(typeof self !== 'undefined' ? self : this);

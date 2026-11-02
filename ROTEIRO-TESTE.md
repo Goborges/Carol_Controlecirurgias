@@ -77,12 +77,15 @@ Em **Quanto caiu na conta?**, escreva `2800`. Logo abaixo da pergunta **deve apa
 4. Toque em **Desfazer**. **Deve aparecer** de novo "Falta receber R$ 250,00". Feche a cirurgia.
 5. No **Início**, o cartão "Para receber" **deve mostrar** "R$ 250 confirmados + ≈ R$ … estimados". Em **Recebimentos**, a cirurgia aparece em "Pagas em parte".
 
-## 7. Nome do paciente
+## 7. Nome do paciente e texto de cobrança
 
 1. Em **Cirurgias**, abra a de **2 de setembro**. **Deve aparecer** "Paciente: Paciente Fictício 01", que veio da planilha.
 2. Abra a de **8 de setembro**, toque em **Editar** e, em **Paciente**, escreva `Fulana Exemplo`. Toque em **Salvar**. A ficha **deve mostrar** o nome.
 3. Em **Cirurgias**, toque em **Todas**. A lista **deve mostrar** o nome na de 8 de setembro. Na busca, escreva `fulana`: **deve aparecer** só ela.
 4. Em **Relatórios → Tabela**, o nome **deve aparecer** embaixo da operação. Em **Relatórios → Relatório do ano**, toque em **Ver cada pagamento**: **deve aparecer** a lista com o nome de cada paciente.
+5. Em **Recebimentos**, toque em **Texto de cobrança**. **Deve aparecer** um botão para cada hospital, com quantas cirurgias estão em aberto. Toque em **UMC**: **deve aparecer** o texto "Honorários médicos em aberto – UMC", com cada cirurgia e o valor ("a confirmar" quando ainda não tem valor). Como os dados para recebimento estão vazios, **deve aparecer** o aviso "Faltam seus dados para recebimento".
+6. Toque em **Preencher**, escreva dados inventados (por exemplo, a chave PIX `fulana@exemplo.com` e a assinatura `Dra. Fulana Exemplo`) e toque em **Salvar**. O texto **deve terminar** com "Chave PIX: fulana@exemplo.com", "Atenciosamente," e a assinatura.
+7. Em **Nome do paciente**, toque em **Não incluir**: os nomes saem do texto. Toque em **Compartilhar**: **deve abrir** a folha do iPhone, com WhatsApp e Mail. Feche sem mandar.
 
 ## 8. Lixeira e Desfazer
 
